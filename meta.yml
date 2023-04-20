@@ -1,4 +1,4 @@
-{% set name = "scram2" %}
+{% set name = "scramAligner" %}
 {% set version = "2.0.1" %}
 
 package:
@@ -37,7 +37,7 @@ test:
     - scram2 --help
     - adaptTrim --help
     - scram2Plot --help
-    
+
 about:
   home: https://github.com/username/{{ name }}
   license: MIT

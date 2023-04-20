@@ -1,19 +1,19 @@
-{% set name = "scramAligner" %}
+{% set name = "scramaligner" %}
 {% set version = "2.0.1" %}
 
 package:
   name: {{ name }}
   version: {{ version }}
 
-source:
-  url: https://github.com/username/{{ name }}/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: your_sha256_checksum_here
+# source:
+#   url: https://github.com/username/{{ name }}/archive/refs/tags/v{{ version }}.tar.gz
+#   sha256: your_sha256_checksum_here
 
 build:
   number: 0
   script_env:
     - GOPATH
-  script: build.sh  # Add the build script
+  # script: build.sh  # Add the build script
   skip: true  # [not linux]
 
 requirements:
@@ -27,10 +27,6 @@ requirements:
     - seaborn
     - numpy
     - pandas
-    - argparse
-    - gzip
-    - csv
-    - os
 
 test:
   commands:

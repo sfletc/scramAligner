@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import argparse
 import gzip
 
@@ -102,7 +104,7 @@ def flex_adapter_trim(
     write_fastx(trimmed_reads, out_fa, fa, gz)
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="Trim read adapters (and 5' and 3' bases if needed) from fastq file and write to a fasta file."
     )
@@ -163,3 +165,6 @@ if __name__ == "__main__":
         fa,
         args.gzip,
     )
+
+if __name__ == "__main__":
+    main()

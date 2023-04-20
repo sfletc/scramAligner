@@ -1,4 +1,4 @@
-module scram2
+module scramAligner
 
 go 1.18
 

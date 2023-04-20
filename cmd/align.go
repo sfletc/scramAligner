@@ -33,7 +33,7 @@ package cmd
 import (
 	"fmt"
 	"os"
-	scramPkg "scram2/scramPkg"
+	scramPkg "scramAligner/scramPkg"
 	"strconv"
 	"strings"
 	"time"
@@ -44,13 +44,13 @@ import (
 // profileCmd represents the align command
 
 var alignCmd = &cobra.Command{
-	Use:   "profile",
+	Use:   "align",
 	Short: "Align reads of length l from 1 read file set to all sequences in a reference file",
 	Long: `Align reads of length l from 1 read file set to all sequences in a reference file
 
 For example:
 
-scram2 align -r ref.fa -1 seq1a.fa,seq1b.fa,seq1c.fa -l 21,22,24 -o testAlign
+scramAligner align -r ref.fa -1 seq1a.fa,seq1b.fa,seq1c.fa -l 21,22,24 -o testAlign
 
 `,
 	Run: func(cmd *cobra.Command, args []string) {

@@ -30,7 +30,7 @@
 
 package main
 
-import "scram2/cmd"
+import "scramAligner/cmd"
 
 func main() {
 	cmd.Execute()

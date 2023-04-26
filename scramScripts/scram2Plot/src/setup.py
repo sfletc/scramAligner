@@ -17,7 +17,7 @@ setup(
             'scram2Plot=scram2Plot:main',
         ],
         'scram2Plot': [
-            'scram2Plot=scram2Plot',
+            'scram2Plot=scram2Plot:main',
         ]
     },
     classifiers=[

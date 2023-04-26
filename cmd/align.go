@@ -61,14 +61,10 @@ scramAligner align -r ref.fa -1 seq1a.fa,seq1b.fa,seq1c.fa -l 21,22,24 -o testAl
 		t0 := time.Now()
 		var a map[string]interface{}
 		var fileOrder []string
-		switch {
-		case !indv:
-			fmt.Println("\nLoading mean and standard errors of replicate reads")
-			a = scramPkg.SeqLoad(strings.Split(fastaSet1, ","), readFileType, adapter, minLen, maxLen, minCount, noNorm)
-		case indv:
-			fmt.Println("\nLoading individual read counts")
-			a, fileOrder = scramPkg.IndvSeqLoad(strings.Split(fastaSet1, ","), readFileType, adapter, minLen, maxLen, minCount, noNorm)
-		}
+
+		fmt.Println("\nLoading individual read counts")
+		a, fileOrder = scramPkg.IndvSeqLoad(strings.Split(fastaSet1, ","), readFileType, adapter, minLen, maxLen, minCount, noNorm)
+
 		fmt.Println("\nLoading reference")
 		c := scramPkg.RefLoad(alignTo)
 		for _, nt := range strings.Split(length, ",") {

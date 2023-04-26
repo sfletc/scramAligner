@@ -11,12 +11,14 @@ setup(
         'pandas>=1.4.0',
         'seaborn>=0.12.0',
         'numpy>=1.23.0',
-        # Add more dependencies as needed
     ],
     entry_points={
         'console_scripts': [
             'scram2Plot=scram2Plot:main',
         ],
+        'scram2Plot': [
+            'scram2Plot=scram2Plot',
+        ]
     },
     classifiers=[
         'Development Status :: 3 - Alpha',

@@ -38,7 +38,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const version = "2.0.1"
+const version = "2.0.4"
 
 var cfgFile string
 var fastaSet1 string
@@ -52,7 +52,6 @@ var maxLen int
 var minCount float64
 var adapter string
 var noNorm bool
-var indv bool
 
 var RootCmd = &cobra.Command{
 	Use:   "scram2",

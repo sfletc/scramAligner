@@ -265,7 +265,7 @@ class DataForPlot(object):
             and np.array_equal(self.rvs, other.rvs)
         )
 
-def profile_plot(align_prefix, align_lens, header, smoothing_window=1, cov = True, abund=True, se = True, save=True, ylim_set=(0,0)):
+def align_plot(align_prefix, align_lens, header, smoothing_window=1, cov = True, abund=True, se = True, save=True, ylim_set=(0,0)):
     """
     
     """
@@ -284,7 +284,7 @@ def profile_plot(align_prefix, align_lens, header, smoothing_window=1, cov = Tru
     if se:
         plt.legend()
     if save:
-        save_file = align_prefix+header+".png"
+        save_file = align_prefix+"_"+header+".png"
         plt.savefig(save_file)
     plt.show()
 
@@ -354,7 +354,9 @@ def main():
     parser.add_argument("-y", "--ylim", help="Set y-axis limit", type=int, nargs=2, default=(0,0))
     parser.add_argument("-n", "--no_save", help="Do not save plot", action="store_true")
     args = parser.parse_args()
-    profile_plot(
+    if args.abundance:
+        args.coverage = True
+    align_plot(
         args.align_prefix,
         args.align_lens,
         args.header,

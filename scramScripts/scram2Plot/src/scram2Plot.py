@@ -331,13 +331,21 @@ def single_plot(ref_profiles, header, smoothing_window, cov, abund, se):
             else:
                 plt.plot(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.8)
             plt.fill_between(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.05)
-        
+
+
+def comma_separated_ints(value):
+    try:
+        return [int(v) for v in value.split(',')]
+    except ValueError:
+        raise argparse.ArgumentTypeError("Invalid comma-separated integers: '{}'".format(value))
+
+
 
 # command line interface for profile_plot
 def main():
     parser = argparse.ArgumentParser(description="Plot abundance profiles")
     parser.add_argument("align_prefix", help="Prefix of alignment files")
-    parser.add_argument("align_lens", help="Lengths of alignments", type=int, nargs="+")
+    parser.add_argument("align_lens", help="Comma-separated list of siRNA lengths to plt", type=comma_separated_ints)
     parser.add_argument("header", help="Header of plot")
     parser.add_argument("-s", "--smoothing_window", help="Smoothing window", type=int, default=1)
     parser.add_argument("-c", "--coverage", help="Plot coverage", action="store_true")

@@ -16,9 +16,6 @@ setup(
         'console_scripts': [
             'scram2Plot=scram2Plot:main',
         ],
-        'scram2Plot': [
-            'scram2Plot=scram2Plot:main',
-        ]
     },
     classifiers=[
         'Development Status :: 3 - Alpha',

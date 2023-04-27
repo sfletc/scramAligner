@@ -11,3 +11,31 @@ __pycache__/
 .cache/
 *.pycache
 .py_cache/
+
+# Distribution / packaging files
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+myenv/
+*.venv/
+
+# Pytest cache and coverage files
+.pytest_cache/
+.coverage
+
+# Jupyter Notebook files
+.ipynb_checkpoints/
+
+# IDE/project files
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db

@@ -6,28 +6,27 @@ The scramAligner pipeline is designer to align small RNA reads to references seq
 
 ### Installation
 
-
-
-
+TODO: Add installation instructions
 
 ### Usage
 
-NAME
+NAME:
+
 scramAligner- a command line Golang-based small RNA exact matching aligner
 
-SYNOPSIS
+SYNOPSIS:
+```
 scramAligner -r <reference> -f <fileSet> -l <length> -o <outFilePrefix> [flags]
+```
 
+DESCRIPTION:
 
-DESCRIPTION
 The SCRAM Aligner is a Golang-based command line application that performs exact matching alignment of small RNA sequences against a reference FASTA file. It is a core component of the SCRAM pipeline for small RNA exact matching alignment.
 
-OPTIONS
--h, --help
-Display the help message and exit.
+FLAGS:
 
-FLAGS
-```-r, --alignTo <path>
+```
+-r, --alignTo <path>
     Path to the FASTA reference file.
 
 -f, --fastxSet <path>
@@ -61,7 +60,7 @@ FLAGS
     3' adapter sequence to trim - FASTA & FASTQ only (default: "nil").
 ```
 
-EXAMPLES
+EXAMPLE:
 ```
 scramAligner -r reference.fa -f reads.fq.gz -l 21,22,24 -o out
 ```

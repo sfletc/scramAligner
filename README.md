@@ -66,4 +66,52 @@ EXAMPLE:
 ```
 scramAligner -r reference.fa -f reads.fq.gz -l 21,22,24 -o out
 ```
+-------
 
+## scramAligner Plotting Tool
+
+The scramAligner plotting tool provides you with an easy and effective way to visualize the abundance profiles from your alignment outputs. The tool takes in various arguments to tailor your visualization as per your needs. It also provides options to plot coverage, abundance, and error based on your inputs.
+
+USAGE: 
+
+The tool can be run from the command line as follows:
+
+```
+python plot_tool.py [align_prefix] [align_lens] [header] [options]
+```
+
+#### Required Arguments:
+
+- `align_prefix`: This argument specifies the prefix of alignment files - this is typically the prefix of the output file from scramAligner.
+- `align_lens`: This argument requires a comma-separated list of siRNA lengths to plot.
+- `header`: The exact header of the reference sequence (excluding the '>') to plot.
+
+#### Optional Arguments:
+
+
+- `-s`, `--smoothing_window`: Set the smoothing window (default is 1).
+- `-c`, `--coverage`: Include this flag to plot coverage.
+- `-a`, `--abundance`: Include this flag to plot abundance.
+- `-e`, `--error`: Include this flag to plot error.
+- `-y`, `--ylim`: Set y-axis limit. This argument takes in 2 values in a tuple indicating the lower and upper limits of the y-axis.
+- `-n`, `--no_save`: Include this flag to not save the plot.
+
+Note: If you choose to plot abundance, coverage will automatically be plotted.
+
+Example:
+
+```
+python plot_tool.py align_prefix align_lens "Plot Header" -s 3 -c -a -y (-100,100)
+```
+
+This command will plot both coverage and abundance with a smoothing window of size 3 and y-axis limit from -100 to 100. The resulting plot will be saved by default.
+
+------
+
+### License
+
+BSD 3-Clause License
+
+### Contact
+
+For questions or comments, please contact: Stephen Fletcher (s.fletcher@uq.edu.au)

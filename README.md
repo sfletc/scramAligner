@@ -14,14 +14,16 @@ NAME:
 
 scramAligner- a command line Golang-based small RNA exact matching aligner
 
-SYNOPSIS:
-```
-scramAligner -r <reference> -f <fileSet> -l <length> -o <outFilePrefix> [flags]
-```
 
 DESCRIPTION:
 
 The SCRAM Aligner is a Golang-based command line application that performs exact matching alignment of small RNA sequences against a reference FASTA file. It is a core component of the SCRAM pipeline for small RNA exact matching alignment.
+
+
+SYNOPSIS:
+```
+scramAligner -r <reference> -f <fileSet> -l <length> -o <outFilePrefix> [flags]
+```
 
 FLAGS:
 

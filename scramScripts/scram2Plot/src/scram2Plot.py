@@ -13,7 +13,30 @@ import argparse
 
 class DNA(object):
     """
-    DNA class
+    The DNA class represents a DNA sequence in a biological context.
+    
+    Class Attributes:
+    dna_alphabet : set
+        The nucleotides that can be found in a DNA sequence (Adenine, Guanine, Cytosine, Thymine, and N for unknown).
+    
+    Instance Attributes:
+    sequence : str
+        A string representing the DNA sequence. All characters are automatically converted to upper-case.
+    
+    Methods:
+    __len__:
+        Returns the length of the DNA sequence.
+    __getitem__:
+        Allows indexing into the DNA sequence.
+    __hash__:
+        Returns a hash value of the DNA sequence.
+    __repr__:
+        Returns a string representation of the DNA sequence.
+    __eq__:
+        Determines if two DNA objects have the same DNA sequence.
+    
+    Note: The DNA sequence should only contain characters that are in the dna_alphabet. 
+    No checks for invalid characters are performed.
     """
 
     dna_alphabet = set("AGCTN")
@@ -39,7 +62,36 @@ class DNA(object):
 
 class SingleAlignment(object):
     """
-    Single sRNA read alignment class
+    The SingleAlignment class represents a single alignment of a small RNA (sRNA) sequence against a reference sequence.
+    
+    Each instance of the class reflects an exact match and carries a list of floating-point counts representing the number of sRNAs 
+    from each input read file that align at this location.
+
+    Attributes:
+    srna : DNA
+        The DNA object representing the sRNA read.
+    position : int
+        The position in the reference sequence where the sRNA read aligns.
+    strand : str
+        The DNA strand ('+' or '-') where the sRNA read aligns.
+    times_aligned : int
+        The total number of positions the sRNA read can align to across all reference sequences.
+    indv_alignments : list of float
+        A numpy array of floating-point counts representing sRNA count for each individual sample.  Float as may be reads per million reads
+        
+    Methods:
+    srna_len():
+        Returns the length of the sRNA read.
+    standard_error():
+        Calculates the standard error of the individual alignment counts.
+    mean_alignments():
+        Calculates the mean of the individual alignment counts
+    __str__():
+        Returns a string representation of the SingleAlignment object, suitable for output.
+    __repr__():
+        Returns the same as __str__(), a string representation of the object.
+    __eq__():
+        Determines if two SingleAlignment objects are identical, including their individual alignments.
     """
 
     def __init__(self, srna, position, strand, times_aligned, indv_alignments):
@@ -84,7 +136,23 @@ class SingleAlignment(object):
 
 class SingleRefProfile(object):
     """
-    Single reference sequence class
+    The SingleRefProfile class encapsulates the alignment profile of a single reference sequence.
+    
+    This class stores the length of the reference sequence and a list of all sRNA alignments against this reference.
+
+    Attributes:
+    ref_len : int
+        The length of the reference sequence.
+    all_alignments : list of SingleAlignment objects
+        A list of SingleAlignment objects representing all sRNA alignments against the reference sequence.
+
+    Methods:
+    __str__():
+        Returns a string representation of the SingleRefProfile object, suitable for output.
+    __repr__():
+        Returns the same as __str__(), a string representation of the object.
+    __eq__():
+        Determines if two SingleRefProfile objects are identical, including their list of alignments.
     """
 
     def __init__(self):
@@ -106,7 +174,26 @@ class SingleRefProfile(object):
 
 class RefProfiles(object):
     """
-    All references in a file class
+    The RefProfiles class represents the alignment profiles for all reference sequences in an alignment file of a set read or sRNA length.
+
+    This class stores the length of the small RNA read (sRNA), the number of replicates, and a dictionary containing SingleRefProfile 
+    objects for each reference sequence.
+
+    Attributes:
+    srna_len : int
+        The length of the sRNA.
+    replicates : int
+        The number of replicate samples.
+    single_ref_profiles : dict
+        A dictionary where keys are reference sequence headers and values are SingleRefProfile objects representing the alignment profile for each reference sequence.
+
+    Methods:
+    __str__():
+        Returns a string representation of the RefProfiles object, suitable for output.
+    __eq__():
+        Determines if two RefProfiles objects are identical.
+    load_single_ref_profiles(in_file):
+        Loads alignment profiles from a given scram2 profile file. Each line of the file represents a SingleAlignment of a sRNA read.
     """
 
     def __init__(self):
@@ -132,28 +219,32 @@ class RefProfiles(object):
         Args:
             in_file (string): scram2 profile file path
         """
-        with open(in_file, "r") as in_handle:
-            reader = csv.reader(in_handle, delimiter=",")
-            for row in reader:
-                if row[0] == "Header":
-                    continue
-                header = row[0]
-                ref_len = int(row[1])
-                srna = DNA(row[2])
-                position = int(row[3])
-                strand = row[4]
-                times_aligned = int(row[5])
-                indv_alignments = np.array([float(x) for x in row[6:]])
-                sa = SingleAlignment(
-                    srna, position, strand, times_aligned, indv_alignments
-                )
-                if header not in self.single_ref_profiles:
-                    self.single_ref_profiles[header] = SingleRefProfile()
-                    self.single_ref_profiles[header].ref_len = ref_len
-                    self.srna_len = len(srna)
-                self.single_ref_profiles[header].all_alignments.append(sa)
-            self.replicates = len(sa.indv_alignments)
+        try:
+            with open(in_file, "r") as in_handle:
+                reader = csv.reader(in_handle, delimiter=",")
+                for row in reader:
+                    if row[0] == "Header":
+                        continue
+                    header = row[0]
+                    ref_len = int(row[1])
+                    srna = DNA(row[2])
+                    position = int(row[3])
+                    strand = row[4]
+                    times_aligned = int(row[5])
+                    indv_alignments = np.array([float(x) for x in row[6:]])
+                    sa = SingleAlignment(
+                        srna, position, strand, times_aligned, indv_alignments
+                    )
 
+                    if header not in self.single_ref_profiles:
+                        self.single_ref_profiles[header] = SingleRefProfile()
+                        self.single_ref_profiles[header].ref_len = ref_len
+                        self.srna_len = len(srna)
+                    self.single_ref_profiles[header].all_alignments.append(sa)
+
+                self.replicates = len(sa.indv_alignments)
+        except:
+            print("\nEmpty or broken alignment file - skipping")
 
 class DataForPlot(object):
     """
@@ -275,9 +366,8 @@ def align_plot(align_prefix, align_lens, header, smoothing_window=1, cov = True,
         file_paths.append("{0}_{1}.csv".format(align_prefix, i))
     for i in file_paths:
         if not os.path.isfile(i):
-            raise FileNotFoundError("File {0} not found".format(i))
+            pass
         else:
-            
             rp = RefProfiles()
             rp.load_single_ref_profiles(i)
             single_plot(rp, header, smoothing_window, cov, abund, se)
@@ -309,29 +399,31 @@ def single_plot(ref_profiles, header, smoothing_window, cov, abund, se):
                   18:'#f781bf', 19:'#a65628', 20:'#984ea3',
                   23:'#999999', 25:'brown', 26:'#dede00', 27:"orange", 28:"yellow"} #TODO: complete
     
-    spd = DataForPlot(ref_profiles, header)
-    plt.plot(spd.x_axis, [0]*len(spd.x_axis), color='grey',linewidth=0.5)
-    if cov:
-        if abund:
-            spd.convert_to_coverage(abund=True)
-        else:
-            spd.convert_to_coverage(abund=False)
-    if se:
-        spd.convert_to_error_bounds()
-        spd.flatten(smoothing_window)
-        plt.fill_between(spd.x_axis, spd.y_flat[0], spd.y_flat[2], color=cols[spd.srna_len], alpha=0.4, label=str(spd.srna_len)+" nt")
-        plt.fill_between(spd.x_axis, spd.y_flat[1], spd.y_flat[3], color=cols[spd.srna_len], alpha=0.4)
-    else:
-        spd.flatten(smoothing_window)
-        first=True
-        for i in range(spd.replicates):
-            if first:
-                plt.plot(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.8, label=str(spd.srna_len)+" nt")
-                first=False
+    try:
+        spd = DataForPlot(ref_profiles, header)
+        plt.plot(spd.x_axis, [0]*len(spd.x_axis), color='grey',linewidth=0.5)
+        if cov:
+            if abund:
+                spd.convert_to_coverage(abund=True)
             else:
-                plt.plot(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.8)
-            plt.fill_between(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.05)
-
+                spd.convert_to_coverage(abund=False)
+        if se:
+            spd.convert_to_error_bounds()
+            spd.flatten(smoothing_window)
+            plt.fill_between(spd.x_axis, spd.y_flat[0], spd.y_flat[2], color=cols[spd.srna_len], alpha=0.4, label=str(spd.srna_len)+" nt")
+            plt.fill_between(spd.x_axis, spd.y_flat[1], spd.y_flat[3], color=cols[spd.srna_len], alpha=0.4)
+        else:
+            spd.flatten(smoothing_window)
+            first=True
+            for i in range(spd.replicates):
+                if first:
+                    plt.plot(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.8, label=str(spd.srna_len)+" nt")
+                    first=False
+                else:
+                    plt.plot(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.8)
+                plt.fill_between(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.05)
+    except:
+        pass
 
 def comma_separated_ints(value):
     try:
@@ -367,7 +459,3 @@ def main():
         not args.no_save,
         args.ylim,
     )
-
-if __name__ == "__main__":
-    main()
-    

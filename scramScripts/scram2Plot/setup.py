@@ -14,7 +14,8 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'scram2Plot=scram2Plot:main',
+            'profilePlot=scram2Plot.profilePlot:main',
+            'binPlot=scram2Plot.binPlot:main',
         ],
     },
     classifiers=[

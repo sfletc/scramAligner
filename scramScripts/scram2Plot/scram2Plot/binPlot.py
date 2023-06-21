@@ -7,7 +7,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from scram2Plot import RefProfiles
+from scram2Plot.profilePlot import RefProfiles
 
 def get_bin_data(srp, bin_size):
     """
@@ -206,7 +206,7 @@ def bin_plot(
 def comma_separated_values(value):
     return [int(i) if i.isdigit() else i for i in value.split(',')]
 
-def main(args):
+def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_prefix', type=str, required=True, help='Prefix of the input file')
@@ -217,9 +217,9 @@ def main(args):
     parser.add_argument('--y_min', type=int, default=None, help='Minimum y-axis value (optional)')
     parser.add_argument('--y_max', type=int, default=None, help='Maximum y-axis value (optional)')
     
-    args = parser.parse_args(args)
+    args = parser.parse_args(sys.argv[1:])
 
     bin_plot(args.file_prefix, args.lens, args.header_prefix, args.bin_size, args.out_prefix, args.y_min, args.y_max)
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main()

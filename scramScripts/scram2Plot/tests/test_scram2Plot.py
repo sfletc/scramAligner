@@ -1,7 +1,7 @@
 import pytest
 import csv
 import numpy as np
-from src.scram2Plot import *
+from scramScripts.scram2Plot.scram2Plot.profilePlot import *
 
 def test_init():
     dna = DNA("AGCT")

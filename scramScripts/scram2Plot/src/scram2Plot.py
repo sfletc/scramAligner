@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
 import os.path
 import csv
 import seaborn as sns
@@ -10,19 +10,18 @@ import numpy as np
 import argparse
 
 
-
 class DNA(object):
     """
     The DNA class represents a DNA sequence in a biological context.
-    
+
     Class Attributes:
     dna_alphabet : set
         The nucleotides that can be found in a DNA sequence (Adenine, Guanine, Cytosine, Thymine, and N for unknown).
-    
+
     Instance Attributes:
     sequence : str
         A string representing the DNA sequence. All characters are automatically converted to upper-case.
-    
+
     Methods:
     __len__:
         Returns the length of the DNA sequence.
@@ -34,8 +33,8 @@ class DNA(object):
         Returns a string representation of the DNA sequence.
     __eq__:
         Determines if two DNA objects have the same DNA sequence.
-    
-    Note: The DNA sequence should only contain characters that are in the dna_alphabet. 
+
+    Note: The DNA sequence should only contain characters that are in the dna_alphabet.
     No checks for invalid characters are performed.
     """
 
@@ -63,8 +62,8 @@ class DNA(object):
 class SingleAlignment(object):
     """
     The SingleAlignment class represents a single alignment of a small RNA (sRNA) sequence against a reference sequence.
-    
-    Each instance of the class reflects an exact match and carries a list of floating-point counts representing the number of sRNAs 
+
+    Each instance of the class reflects an exact match and carries a list of floating-point counts representing the number of sRNAs
     from each input read file that align at this location.
 
     Attributes:
@@ -78,7 +77,7 @@ class SingleAlignment(object):
         The total number of positions the sRNA read can align to across all reference sequences.
     indv_alignments : list of float
         A numpy array of floating-point counts representing sRNA count for each individual sample.  Float as may be reads per million reads
-        
+
     Methods:
     srna_len():
         Returns the length of the sRNA read.
@@ -104,7 +103,7 @@ class SingleAlignment(object):
     def srna_len(self):
         return len(self.srna)
 
-    def standard_error(self): #TODO: check - likely don't neeed here
+    def standard_error(self):  # TODO: check - likely don't neeed here
         return np.std(self.indv_alignments, ddof=1) / np.sqrt(
             np.size(self.indv_alignments)
         )
@@ -137,12 +136,16 @@ class SingleAlignment(object):
 class SingleRefProfile(object):
     """
     The SingleRefProfile class encapsulates the alignment profile of a single reference sequence.
-    
-    This class stores the length of the reference sequence and a list of all sRNA alignments against this reference.
+
+    This class stores the length of the reference sequence, the number of replicates, the length of sRNA, and a list of all sRNA alignments against this reference.
 
     Attributes:
     ref_len : int
         The length of the reference sequence.
+    replicates : int
+        The number of replicates.
+    srna_len : int
+        The length of sRNA.
     all_alignments : list of SingleAlignment objects
         A list of SingleAlignment objects representing all sRNA alignments against the reference sequence.
 
@@ -151,12 +154,15 @@ class SingleRefProfile(object):
         Returns a string representation of the SingleRefProfile object, suitable for output.
     __repr__():
         Returns the same as __str__(), a string representation of the object.
-    __eq__():
+    __eq__(other: SingleRefProfile) -> bool:
         Determines if two SingleRefProfile objects are identical, including their list of alignments.
+        `other` is the other SingleRefProfile object to compare with.
     """
 
     def __init__(self):
         self.ref_len = 0
+        self.replicates = 0
+        self.srna_len = 0
         self.all_alignments = []
 
     def __str__(self):
@@ -169,6 +175,8 @@ class SingleRefProfile(object):
         return (
             self.ref_len == other.ref_len
             and self.all_alignments == other.all_alignments
+            and self.replicates == other.replicates
+            and self.snra_len == other.srna_len
         )
 
 
@@ -176,7 +184,7 @@ class RefProfiles(object):
     """
     The RefProfiles class represents the alignment profiles for all reference sequences in an alignment file of a set read or sRNA length.
 
-    This class stores the length of the small RNA read (sRNA), the number of replicates, and a dictionary containing SingleRefProfile 
+    This class stores the length of the small RNA read (sRNA), the number of replicates, and a dictionary containing SingleRefProfile
     objects for each reference sequence.
 
     Attributes:
@@ -225,26 +233,47 @@ class RefProfiles(object):
                 for row in reader:
                     if row[0] == "Header":
                         continue
-                    header = row[0]
-                    ref_len = int(row[1])
-                    srna = DNA(row[2])
-                    position = int(row[3])
-                    strand = row[4]
-                    times_aligned = int(row[5])
-                    indv_alignments = np.array([float(x) for x in row[6:]])
+                    (
+                        header,
+                        ref_len,
+                        srna,
+                        position,
+                        strand,
+                        times_aligned,
+                        *indv_alignments,
+                    ) = row
+
+                    # Construct a SingleAlignment object
+                    srna = DNA(srna)
+                    times_aligned = int(times_aligned)
+                    position = int(position)
+                    ref_len = int(ref_len)
+                    indv_alignments = np.array([float(x) for x in indv_alignments])
                     sa = SingleAlignment(
                         srna, position, strand, times_aligned, indv_alignments
                     )
 
+                    # Add the SingleAlignment to the corresponding SingleRefProfile
                     if header not in self.single_ref_profiles:
                         self.single_ref_profiles[header] = SingleRefProfile()
                         self.single_ref_profiles[header].ref_len = ref_len
+                        self.single_ref_profiles[header].replicates = len(
+                            indv_alignments
+                        )
+                        self.single_ref_profiles[header].srna_len = len(srna)
                         self.srna_len = len(srna)
                     self.single_ref_profiles[header].all_alignments.append(sa)
 
-                self.replicates = len(sa.indv_alignments)
-        except:
-            print("\nEmpty or broken alignment file - skipping")
+                # Set the number of replicates based on the last read alignment
+                if "sa" in locals():
+                    self.replicates = len(sa.indv_alignments)
+                else:
+                    raise ValueError("The input file does not contain any alignments")
+        except FileNotFoundError:
+            print(f"The input file {in_file} does not exist. Skipping.")
+        except Exception as e:
+            print(f"An error occurred while processing the input file {in_file}: {e}")
+
 
 class DataForPlot(object):
     """
@@ -262,7 +291,7 @@ class DataForPlot(object):
         self.x_axis = list(range(len(self.fwd)))
         self.y_flat = []
         self._extract_from_ref_profiles()
-    
+
     def _extract_from_ref_profiles(self):
         """Extracts data from a ref profiles object
 
@@ -283,71 +312,83 @@ class DataForPlot(object):
         self.fwd = self._coverage_per_strand(self.fwd, abund)
         self.rvs = self._coverage_per_strand(self.rvs, abund)
 
-    def _coverage_per_strand(self, old_array, abund): #TODO: Fix for better use of numpy
+    def _coverage_per_strand(
+        self, old_array, abund
+    ):  # TODO: Fix for better use of numpy
         """
 
         Args:
             old_array (_type_): _description_
         """
-        new_arr= np.zeros((old_array.shape), dtype=float)
-        for i in range(len(new_arr)-self.srna_len+1):
+        new_arr = np.zeros((old_array.shape), dtype=float)
+        for i in range(len(new_arr) - self.srna_len + 1):
             for j in range(len(new_arr[i])):
                 if not abund:
-                    new_arr[i:i+self.srna_len, j]+=old_array[i,j]
+                    new_arr[i : i + self.srna_len, j] += old_array[i, j]
                 else:
                     for k in range(self.srna_len):
-                        if old_array[i,j]>new_arr[i+k,j]:
-                            new_arr[i+k,j]=old_array[i,j]
+                        if old_array[i, j] > new_arr[i + k, j]:
+                            new_arr[i + k, j] = old_array[i, j]
         return new_arr
-    
-    def convert_to_error_bounds(self): #TODO: document and test
-        """_summary_
-        """
+
+    def convert_to_error_bounds(self):  # TODO: document and test
+        """_summary_"""
         self.fwd = self._error_bounds(self.fwd)
         self.rvs = self._error_bounds(self.rvs)
-    
-    def _error_bounds(self, old_array): #TODO: document and test
-        """_summary_
-        """
-        new_arr= np.zeros((self.ref_len + 1, 2), dtype=float)
-        for i in range(len(new_arr)):
-            new_arr[i,0]=np.mean(old_array[i,:])-(np.std(old_array[i,:])/np.sqrt(self.replicates))
-            new_arr[i,1]=np.mean(old_array[i,:])+(np.std(old_array[i,:])/np.sqrt(self.replicates))
-        return new_arr        
 
-    def flatten(self, d = 1):
+    def _error_bounds(self, old_array):  # TODO: document and test
+        """_summary_"""
+        new_arr = np.zeros((self.ref_len + 1, 2), dtype=float)
+        for i in range(len(new_arr)):
+            new_arr[i, 0] = np.mean(old_array[i, :]) - (
+                np.std(old_array[i, :]) / np.sqrt(self.replicates)
+            )
+            new_arr[i, 1] = np.mean(old_array[i, :]) + (
+                np.std(old_array[i, :]) / np.sqrt(self.replicates)
+            )
+        return new_arr
+
+    def flatten(self, d=1):
         if d == 1:
             for i in range(self.fwd.shape[1]):
-                self.y_flat.append(self.fwd[:,[i]].flatten())
-                self.y_flat.append(-self.rvs[:,[i]].flatten())
+                self.y_flat.append(self.fwd[:, [i]].flatten())
+                self.y_flat.append(-self.rvs[:, [i]].flatten())
         else:
             for i in range(self.fwd.shape[1]):
-                self.y_flat.append(self._smoothTriangle(self.fwd[:,[i]].flatten(),d))
-                self.y_flat.append(self._smoothTriangle(-self.rvs[:,[i]].flatten(),d))
-    
+                self.y_flat.append(self._smoothTriangle(self.fwd[:, [i]].flatten(), d))
+                self.y_flat.append(self._smoothTriangle(-self.rvs[:, [i]].flatten(), d))
+
     @staticmethod
     def _smoothTriangle(data, degree):
-        triangle=np.concatenate((np.arange(degree + 1), np.arange(degree)[::-1])) # up then down
-        smoothed=[]
+        triangle = np.concatenate(
+            (np.arange(degree + 1), np.arange(degree)[::-1])
+        )  # up then down
+        smoothed = []
 
         for i in range(degree, len(data) - degree * 2):
-            point=data[i:i + len(triangle)] * triangle
-            smoothed.append(np.sum(point)/np.sum(triangle))
+            point = data[i : i + len(triangle)] * triangle
+            smoothed.append(np.sum(point) / np.sum(triangle))
         # Handle boundaries
-        smoothed=[smoothed[0]]*int(degree + degree/2) + smoothed #TODO: this can be better
+        smoothed = [smoothed[0]] * int(
+            degree + degree / 2
+        ) + smoothed  # TODO: this can be better
         while len(smoothed) < len(data):
             smoothed.append(smoothed[-1])
-        return smoothed   
+        return smoothed
 
-    def __str__(self): #TODO: update
+    def __str__(self):  # TODO: update
         return "{0}\t{1}\t{2}\t{3}\t{4}".format(
-            self.header, self.ref_len, self.srna_len, self.fwd, self.rvs,
+            self.header,
+            self.ref_len,
+            self.srna_len,
+            self.fwd,
+            self.rvs,
         )
 
     def __repr__(self):
         return self.__str__()
 
-    def __eq__(self, other): #TODO: update
+    def __eq__(self, other):  # TODO: update
         return (
             self.header == other.header
             and self.ref_len == other.ref_len
@@ -356,52 +397,63 @@ class DataForPlot(object):
             and np.array_equal(self.rvs, other.rvs)
         )
 
-def align_plot(align_prefix, align_lens, header, smoothing_window=1, cov = True, abund=True, se = True, save=True, ylim_set=(0,0)):
-    """
-    
-    """
+
+def align_plot(align_prefix, align_lens, header, smoothing_window=1, cov=True, abund=True, se=True, save=True, ylim_set=(0, 0)):
     file_paths = []
     set_up_plot(ylim_set)
     for i in align_lens:
         file_paths.append("{0}_{1}.csv".format(align_prefix, i))
+    rp = RefProfiles()
     for i in file_paths:
         if not os.path.isfile(i):
             pass
         else:
-            rp = RefProfiles()
             rp.load_single_ref_profiles(i)
-            single_plot(rp, header, smoothing_window, cov, abund, se)
+    if isinstance(header, list):
+        for h in header:
+            single_plot(rp, h, smoothing_window, cov, abund, se)
+    else:
+        single_plot(rp, header, smoothing_window, cov, abund, se)
     if se:
         plt.legend()
     if save:
-        save_file = align_prefix+"_"+header+".png"
+        if isinstance(header, list):
+            save_file = align_prefix + "_" + "_".join(header) + ".png"
+        else:
+            save_file = align_prefix + "_" + header + ".png"
         plt.savefig(save_file)
     plt.show()
 
 
-
 def set_up_plot(ylim_set):
-    """
-    """
+    """ """
     plt.figure(figsize=(12, 6), dpi=300)
     plt.xlabel("Position")
     plt.ylabel("Abundance")
     plt.title("Abundance Profile")
-    if ylim_set!=(0,0):
-        plt.ylim(ylim_set[0],ylim_set[1])
-    
+    if ylim_set != (0, 0):
+        plt.ylim(ylim_set[0], ylim_set[1])
 
 
 def single_plot(ref_profiles, header, smoothing_window, cov, abund, se):
-    """
-    """
-    cols={24:'darkgreen', 21:'red', 22:'blue',
-                  18:'#f781bf', 19:'#a65628', 20:'#984ea3',
-                  23:'#999999', 25:'brown', 26:'#dede00', 27:"orange", 28:"yellow"} #TODO: complete
-    
+    """ """
+    cols = {
+        24: "darkgreen",
+        21: "red",
+        22: "blue",
+        18: "#f781bf",
+        19: "#a65628",
+        20: "#984ea3",
+        23: "#999999",
+        25: "brown",
+        26: "#dede00",
+        27: "orange",
+        28: "yellow",
+    }  # TODO: complete
+
     try:
         spd = DataForPlot(ref_profiles, header)
-        plt.plot(spd.x_axis, [0]*len(spd.x_axis), color='grey',linewidth=0.5)
+        plt.plot(spd.x_axis, [0] * len(spd.x_axis), color="grey", linewidth=0.5)
         if cov:
             if abund:
                 spd.convert_to_coverage(abund=True)
@@ -410,40 +462,85 @@ def single_plot(ref_profiles, header, smoothing_window, cov, abund, se):
         if se:
             spd.convert_to_error_bounds()
             spd.flatten(smoothing_window)
-            plt.fill_between(spd.x_axis, spd.y_flat[0], spd.y_flat[2], color=cols[spd.srna_len], alpha=0.4, label=str(spd.srna_len)+" nt")
-            plt.fill_between(spd.x_axis, spd.y_flat[1], spd.y_flat[3], color=cols[spd.srna_len], alpha=0.4)
+            plt.fill_between(
+                spd.x_axis,
+                spd.y_flat[0],
+                spd.y_flat[2],
+                color=cols[spd.srna_len],
+                alpha=0.4,
+                label=str(spd.srna_len) + " nt",
+            )
+            plt.fill_between(
+                spd.x_axis,
+                spd.y_flat[1],
+                spd.y_flat[3],
+                color=cols[spd.srna_len],
+                alpha=0.4,
+            )
         else:
             spd.flatten(smoothing_window)
-            first=True
+            first = True
             for i in range(spd.replicates):
                 if first:
-                    plt.plot(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.8, label=str(spd.srna_len)+" nt")
-                    first=False
+                    plt.plot(
+                        spd.x_axis,
+                        spd.y_flat[i],
+                        spd.y_flat[i + spd.replicates],
+                        color=cols[spd.srna_len],
+                        alpha=0.8,
+                        label=str(spd.srna_len) + " nt",
+                    )
+                    first = False
                 else:
-                    plt.plot(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.8)
-                plt.fill_between(spd.x_axis, spd.y_flat[i], spd.y_flat[i+spd.replicates], color=cols[spd.srna_len], alpha=.05)
+                    plt.plot(
+                        spd.x_axis,
+                        spd.y_flat[i],
+                        spd.y_flat[i + spd.replicates],
+                        color=cols[spd.srna_len],
+                        alpha=0.8,
+                    )
+                plt.fill_between(
+                    spd.x_axis,
+                    spd.y_flat[i],
+                    spd.y_flat[i + spd.replicates],
+                    color=cols[spd.srna_len],
+                    alpha=0.05,
+                )
     except:
         pass
 
+
 def comma_separated_ints(value):
     try:
-        return [int(v) for v in value.split(',')]
+        return [int(v) for v in value.split(",")]
     except ValueError:
-        raise argparse.ArgumentTypeError("Invalid comma-separated integers: '{}'".format(value))
+        raise argparse.ArgumentTypeError(
+            "Invalid comma-separated integers: '{}'".format(value)
+        )
 
+def comma_separated_strings(value):
+    return value.split(',')
 
 
 # command line interface for profile_plot
 def main():
     parser = argparse.ArgumentParser(description="Plot abundance profiles")
     parser.add_argument("align_prefix", help="Prefix of alignment files")
-    parser.add_argument("align_lens", help="Comma-separated list of siRNA lengths to plt", type=comma_separated_ints)
-    parser.add_argument("header", help="Header of plot")
-    parser.add_argument("-s", "--smoothing_window", help="Smoothing window", type=int, default=1)
+    parser.add_argument(
+        "align_lens",
+        help="Comma-separated list of siRNA lengths to plt",
+        type=comma_separated_ints,
+    )
+    parser.add_argument("header", help="Header of plot", type=comma_separated_strings)
+    parser.add_argument(
+        "-s", "--smoothing_window", help="Smoothing window", type=int, default=1
+    )
     parser.add_argument("-c", "--coverage", help="Plot coverage", action="store_true")
     parser.add_argument("-a", "--abundance", help="Plot abundance", action="store_true")
     parser.add_argument("-e", "--error", help="Plot error", action="store_true")
-    parser.add_argument("-y", "--ylim", help="Set y-axis limit", type=int, nargs=2, default=(0,0))
+    parser.add_argument(
+        "-y", "--ylim", help="Set y-axis limit", type=int, nargs=2, default=(0, 0)
+    )
     parser.add_argument("-n", "--no_save", help="Do not save plot", action="store_true")
     args = parser.parse_args()
     if args.abundance:

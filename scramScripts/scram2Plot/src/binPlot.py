@@ -7,7 +7,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-
+from scram2Plot import RefProfiles
 
 def get_bin_data(srp, bin_size):
     """

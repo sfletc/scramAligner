@@ -123,9 +123,7 @@ def show_plot(
         plt.savefig(
             filename, bbox_inches="tight"
         )  # Adjust bounding box to fit rotated labels
-    else:
-        plt.show()
-
+    plt.show()
 
 def create_custom_legend(colors_dict, alpha=0.7):
     """
@@ -182,7 +180,7 @@ def load_ref_profiles(file_prefix, lens):
 
 
 def bin_plot(
-    file_prefix, lens, headers, bin_size, out_prefix=None, y_min=None, y_max=None
+    file_prefix, lens, header_prefix, bin_size, out_prefix=None, y_min=None, y_max=None
 ):
     """
     This function performs the binning and plotting process for a set of reference profiles. 
@@ -190,8 +188,10 @@ def bin_plot(
     and then generates a bin plot for each
     """
     rps = load_ref_profiles(file_prefix, lens)
-
+    all_headers = rps[0].single_ref_profiles.keys()
+    headers = [i for i in all_headers if i.startswith(header_prefix)]
     for header in headers:
+        print("\n"+header)
         srps = []
         for i in rps:
             try:
@@ -203,39 +203,23 @@ def bin_plot(
             filename = "{}_{}.png".format(out_prefix, header.split()[0])
         plot_bin_plot(srps, lens, bin_size, filename, y_min, y_max)
 
-
-def extract_headers(filename):
-    """
-    This function extracts headers from a CSV file. The function reads the CSV file, skips the first row, 
-    and then adds the first column of each subsequent row to a set (which automatically removes duplicates). 
-    The set is converted to a list, sorted, and returned.
-    """
-    with open(filename, "r") as file:
-        csv_reader = csv.reader(file)
-        next(csv_reader)  # skip the first row
-        data = set()
-        for row in csv_reader:
-            data.add(row[0])  # add the first column to the set
-        data = list(data)  # convert the set to a list
-        data.sort()  # sort the list
-    return data
-
+def comma_separated_values(value):
+    return [int(i) if i.isdigit() else i for i in value.split(',')]
 
 def main(args):
-    # parsing command line arguments
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_prefix', type=str, required=True, help='Prefix of the input file')
-    parser.add_argument('--lens', type=int, nargs='+', required=True, help='List of lens')
-    parser.add_argument('--headers', type=str, nargs='+', required=True, help='List of headers')
+    parser.add_argument('--lens', type=comma_separated_values, required=True, help='Comma-separated list of lens')
+    parser.add_argument('--header_prefix', type=str, required=True, help='Header prefix')
     parser.add_argument('--bin_size', type=int, required=True, help='Bin size')
     parser.add_argument('--out_prefix', type=str, default=None, help='Output prefix (optional)')
     parser.add_argument('--y_min', type=int, default=None, help='Minimum y-axis value (optional)')
     parser.add_argument('--y_max', type=int, default=None, help='Maximum y-axis value (optional)')
     
     args = parser.parse_args(args)
-    
-    # call your function
-    bin_plot(args.file_prefix, args.lens, args.headers, args.bin_size, args.out_prefix, args.y_min, args.y_max)
+
+    bin_plot(args.file_prefix, args.lens, args.header_prefix, args.bin_size, args.out_prefix, args.y_min, args.y_max)
 
 if __name__ == "__main__":
     main(sys.argv[1:])

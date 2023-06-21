@@ -528,7 +528,7 @@ def main():
     parser.add_argument("align_prefix", help="Prefix of alignment files")
     parser.add_argument(
         "align_lens",
-        help="Comma-separated list of siRNA lengths to plt",
+        help="Comma-separated list of siRNA lengths to plot",
         type=comma_separated_ints,
     )
     parser.add_argument("header", help="Header of plot", type=comma_separated_strings)

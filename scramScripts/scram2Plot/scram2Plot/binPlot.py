@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from scram2Plot.profilePlot import RefProfiles
 
+
 def get_bin_data(srp, bin_size):
     """
     This function gets the bin data by taking in two arguments: a single reference profile object srp and a bin_size.
@@ -58,7 +59,7 @@ def create_dataframe(bins, means, ses):
 
 def plot_standard_errors(df, color="gray", alpha=0.3):
     """
-    This function plots the standard error region for two lists in a DataFrame (df) with a given color and alpha. 
+    This function plots the standard error region for two lists in a DataFrame (df) with a given color and alpha.
     It returns the DataFrame
     """
     for list_name in ["first", "second"]:
@@ -78,9 +79,9 @@ def plot_standard_errors(df, color="gray", alpha=0.3):
 
 def create_plot(bins, color="gray", alpha=0.7):
     """
-    This function generates a plot for the given bin data. 
-    It first calculates the means and standard errors, and then creates a DataFrame. 
-    It then plots the standard error region for the DataFrame. 
+    This function generates a plot for the given bin data.
+    It first calculates the means and standard errors, and then creates a DataFrame.
+    It then plots the standard error region for the DataFrame.
     The DataFrame is returned.
     """
     means, ses = calculate_means_and_ses(bins)
@@ -93,8 +94,8 @@ def show_plot(
     dataframes, scale_factor=1, filename=None, y_min=None, y_max=None, cols={}
 ):
     """
-    This function displays the generated plots for a list of dataframes. 
-    It takes in several parameters including a list of dataframes, a scale factor for the x-axis, a filename (optional), 
+    This function displays the generated plots for a list of dataframes.
+    It takes in several parameters including a list of dataframes, a scale factor for the x-axis, a filename (optional),
     minimum and maximum y-axis values (optional), and a dictionary of colors for the legend (optional).
     """
     plt.axhline(0, color="black")
@@ -125,9 +126,10 @@ def show_plot(
         )  # Adjust bounding box to fit rotated labels
     plt.show()
 
+
 def create_custom_legend(colors_dict, alpha=0.7):
     """
-    This function generates a custom legend using a dictionary of colors and an alpha value for transparency. 
+    This function generates a custom legend using a dictionary of colors and an alpha value for transparency.
     The keys in the dictionary are sorted and a patch is created for each key-value pair.
     """
     # Order by converting keys to integers and sorting
@@ -141,7 +143,7 @@ def create_custom_legend(colors_dict, alpha=0.7):
 
 def plot_bin_plot(srps, lens, bin_size, filename=None, y_min=None, y_max=None):
     """
-    This function generates a plot of binned data. It takes in several parameters including a list of single 
+    This function generates a plot of binned data. It takes in several parameters including a list of single
     reference profile objects, a list of lengths, bin size, and optional parameters for filename and y-axis limits.
     """
     plt.figure(figsize=(10, 6))
@@ -164,10 +166,9 @@ def plot_bin_plot(srps, lens, bin_size, filename=None, y_min=None, y_max=None):
     show_plot(dfs, bin_size, filename, y_min, y_max, cols)
 
 
-
 def load_ref_profiles(file_prefix, lens):
     """
-    This function loads reference profiles from a specified file for each length in the lens list. 
+    This function loads reference profiles from a specified file for each length in the lens list.
     It returns a list of reference profiles.
     """
     rp = []
@@ -183,15 +184,15 @@ def bin_plot(
     file_prefix, lens, header_prefix, bin_size, out_prefix=None, y_min=None, y_max=None
 ):
     """
-    This function performs the binning and plotting process for a set of reference profiles. 
-    It loads reference profiles, extracts the single reference profile for each header, 
+    This function performs the binning and plotting process for a set of reference profiles.
+    It loads reference profiles, extracts the single reference profile for each header,
     and then generates a bin plot for each
     """
     rps = load_ref_profiles(file_prefix, lens)
     all_headers = rps[0].single_ref_profiles.keys()
     headers = [i for i in all_headers if i.startswith(header_prefix)]
     for header in headers:
-        print("\n"+header)
+        print("\n" + header)
         srps = []
         for i in rps:
             try:
@@ -203,23 +204,50 @@ def bin_plot(
             filename = "{}_{}.png".format(out_prefix, header.split()[0])
         plot_bin_plot(srps, lens, bin_size, filename, y_min, y_max)
 
+
 def comma_separated_values(value):
-    return [int(i) if i.isdigit() else i for i in value.split(',')]
+    return [int(i) if i.isdigit() else i for i in value.split(",")]
+
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Plot binned data for long references (e.g. chromosomes)"
+    )
+    parser.add_argument(
+        "file_prefix", type=str, required=True, help="Prefix of the input file"
+    )
+    parser.add_argument(
+        "lens",
+        type=comma_separated_values,
+        required=True,
+        help="Comma-separated list of alignment lengths to plot",
+    )
+    parser.add_argument(
+        "header_prefix", type=str, required=True, help="Header prefix"
+    )
+    parser.add_argument("--bin_size", type=int, required=True, help="Bin size", default=50000)
+    parser.add_argument(
+        "--out_prefix", type=str, default=None, help="Output prefix (optional)"
+    )
+    parser.add_argument(
+        "--y_min", type=int, default=None, help="Minimum y-axis value (optional)"
+    )
+    parser.add_argument(
+        "--y_max", type=int, default=None, help="Maximum y-axis value (optional)"
+    )
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--file_prefix', type=str, required=True, help='Prefix of the input file')
-    parser.add_argument('--lens', type=comma_separated_values, required=True, help='Comma-separated list of lens')
-    parser.add_argument('--header_prefix', type=str, required=True, help='Header prefix')
-    parser.add_argument('--bin_size', type=int, required=True, help='Bin size')
-    parser.add_argument('--out_prefix', type=str, default=None, help='Output prefix (optional)')
-    parser.add_argument('--y_min', type=int, default=None, help='Minimum y-axis value (optional)')
-    parser.add_argument('--y_max', type=int, default=None, help='Maximum y-axis value (optional)')
-    
     args = parser.parse_args(sys.argv[1:])
 
-    bin_plot(args.file_prefix, args.lens, args.header_prefix, args.bin_size, args.out_prefix, args.y_min, args.y_max)
+    bin_plot(
+        args.file_prefix,
+        args.lens,
+        args.header_prefix,
+        args.bin_size,
+        args.out_prefix,
+        args.y_min,
+        args.y_max,
+    )
+
 
 if __name__ == "__main__":
     main()

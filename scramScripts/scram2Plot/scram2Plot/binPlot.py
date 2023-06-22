@@ -214,20 +214,19 @@ def main():
         description="Plot binned data for long references (e.g. chromosomes)"
     )
     parser.add_argument(
-        "file_prefix", type=str, required=True, help="Prefix of the input file"
+        "align_prefix", type=str, help="Prefix of alignment files"
     )
     parser.add_argument(
-        "lens",
+        "align_lens",
         type=comma_separated_values,
-        required=True,
-        help="Comma-separated list of alignment lengths to plot",
+        help="Comma-separated list of siRNA lengths to plot",
     )
     parser.add_argument(
-        "header_prefix", type=str, required=True, help="Header prefix"
+        "header_prefix", type=str, help="Prefix of reference header/s to plot"
     )
-    parser.add_argument("--bin_size", type=int, required=True, help="Bin size", default=50000)
+    parser.add_argument("--bin_size", type=int, help="Bin size", default=50000)
     parser.add_argument(
-        "--out_prefix", type=str, default=None, help="Output prefix (optional)"
+        "--out_prefix", type=str, default=None, help="Plot output file prefix (optional)"
     )
     parser.add_argument(
         "--y_min", type=int, default=None, help="Minimum y-axis value (optional)"
@@ -239,8 +238,8 @@ def main():
     args = parser.parse_args(sys.argv[1:])
 
     bin_plot(
-        args.file_prefix,
-        args.lens,
+        args.align_prefix,
+        args.align_lens,
         args.header_prefix,
         args.bin_size,
         args.out_prefix,

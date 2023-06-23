@@ -202,7 +202,9 @@ def bin_plot(
                 pass
         if out_prefix is not None:
             filename = "{}_{}.png".format(out_prefix, header.split()[0])
-        plot_bin_plot(srps, lens, bin_size, filename, y_min, y_max)
+            plot_bin_plot(srps, lens, bin_size, filename, y_min, y_max)
+        else:
+            plot_bin_plot(srps, lens, bin_size, None, y_min, y_max)
 
 
 def comma_separated_values(value):

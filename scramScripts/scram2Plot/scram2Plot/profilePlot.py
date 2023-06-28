@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import numpy as np
 import matplotlib.pyplot as plt
 import os.path
@@ -221,11 +219,17 @@ class RefProfiles(object):
             and self.srna_len == other.srna_len
         )
 
-    def load_single_ref_profiles(self, in_file):
+
+
+    def load_single_ref_profiles(self, in_file, header=None, start=None, end=None, padding=30):
         """Loads a scram2 profile file for a single sRNA length
 
         Args:
             in_file (string): scram2 profile file path
+            header (string): specific header to be parsed
+            start (int): start position of the range
+            end (int): end position of the range
+            padding (int): number of base pairs to include on either end of the range
         """
         try:
             with open(in_file, "r") as in_handle:
@@ -234,7 +238,7 @@ class RefProfiles(object):
                     if row[0] == "Header":
                         continue
                     (
-                        header,
+                        row_header,
                         ref_len,
                         srna,
                         position,
@@ -243,26 +247,32 @@ class RefProfiles(object):
                         *indv_alignments,
                     ) = row
 
+                    # Skip alignments that do not match the input header or are outside the input positions
+                    if header and row_header != header:
+                        continue
+                    if start is not None and end is not None and (int(position) < start - padding or int(position) > end + padding):
+                        continue
+
                     # Construct a SingleAlignment object
                     srna = DNA(srna)
                     times_aligned = int(times_aligned)
-                    position = int(position)
-                    ref_len = int(ref_len)
+                    position = int(position) - start + padding  # New position relative to the start of the subset
+                    ref_len = end - start + 2 * padding  # New reference length
                     indv_alignments = np.array([float(x) for x in indv_alignments])
                     sa = SingleAlignment(
                         srna, position, strand, times_aligned, indv_alignments
                     )
 
                     # Add the SingleAlignment to the corresponding SingleRefProfile
-                    if header not in self.single_ref_profiles:
-                        self.single_ref_profiles[header] = SingleRefProfile()
-                        self.single_ref_profiles[header].ref_len = ref_len
-                        self.single_ref_profiles[header].replicates = len(
+                    if row_header not in self.single_ref_profiles:
+                        self.single_ref_profiles[row_header] = SingleRefProfile()
+                        self.single_ref_profiles[row_header].ref_len = ref_len
+                        self.single_ref_profiles[row_header].replicates = len(
                             indv_alignments
                         )
-                        self.single_ref_profiles[header].srna_len = len(srna)
+                        self.single_ref_profiles[row_header].srna_len = len(srna)
                         self.srna_len = len(srna)
-                    self.single_ref_profiles[header].all_alignments.append(sa)
+                    self.single_ref_profiles[row_header].all_alignments.append(sa)
 
                 # Set the number of replicates based on the last read alignment
                 if "sa" in locals():
@@ -273,6 +283,9 @@ class RefProfiles(object):
             print(f"The input file {in_file} does not exist. Skipping.")
         except Exception as e:
             print(f"An error occurred while processing the input file {in_file}: {e}")
+
+
+
 
 
 class DataForPlot(object):
@@ -398,33 +411,6 @@ class DataForPlot(object):
         )
 
 
-def align_plot(align_prefix, align_lens, header, smoothing_window=1, cov=True, abund=True, se=True, save=True, ylim_set=(0, 0)):
-    file_paths = []
-    set_up_plot(ylim_set)
-    for i in align_lens:
-        file_paths.append("{0}_{1}.csv".format(align_prefix, i))
-    rp = RefProfiles()
-    for i in file_paths:
-        if not os.path.isfile(i):
-            pass
-        else:
-            rp.load_single_ref_profiles(i)
-    if isinstance(header, list):
-        for h in header:
-            single_plot(rp, h, smoothing_window, cov, abund, se)
-    else:
-        single_plot(rp, header, smoothing_window, cov, abund, se)
-    if se:
-        plt.legend()
-    if save:
-        if isinstance(header, list):
-            save_file = align_prefix + "_" + "_".join(header) + ".png"
-        else:
-            save_file = align_prefix + "_" + header + ".png"
-        plt.savefig(save_file)
-    plt.show()
-
-
 def set_up_plot(ylim_set):
     """ """
     plt.figure(figsize=(12, 6), dpi=300)
@@ -435,8 +421,7 @@ def set_up_plot(ylim_set):
         plt.ylim(ylim_set[0], ylim_set[1])
 
 
-def single_plot(ref_profiles, header, smoothing_window, cov, abund, se):
-    """ """
+def single_plot(ref_profiles, header, start=None, end=None, smoothing_window=1, cov=True, abund=True, se=True):
     cols = {
         24: "darkgreen",
         21: "red",
@@ -449,11 +434,18 @@ def single_plot(ref_profiles, header, smoothing_window, cov, abund, se):
         26: "#dede00",
         27: "orange",
         28: "yellow",
-    }  # TODO: complete
+    }
 
     try:
         spd = DataForPlot(ref_profiles, header)
+
         plt.plot(spd.x_axis, [0] * len(spd.x_axis), color="grey", linewidth=0.5)
+        
+        title = f"Profile for {header}"
+        if start is not None and end is not None:
+            title += f" from position {start} to {end}"
+        plt.title(title)
+
         if cov:
             if abund:
                 spd.convert_to_coverage(abund=True)
@@ -506,6 +498,9 @@ def single_plot(ref_profiles, header, smoothing_window, cov, abund, se):
                     color=cols[spd.srna_len],
                     alpha=0.05,
                 )
+        if start is not None:
+            x_ticks = plt.xticks()[0] 
+            plt.xticks(x_ticks, [int(x + start - 30) for x in x_ticks])  # Adjusting for 30 bp padding
     except:
         pass
 
@@ -518,11 +513,56 @@ def comma_separated_ints(value):
             "Invalid comma-separated integers: '{}'".format(value)
         )
 
-def comma_separated_strings(value):
-    return value.split(',')
 
+def comma_separated_strings(value):
+    return value.split(",")
+
+
+def align_plot(
+    align_prefix,
+    align_lens,
+    header,
+    start=None,
+    end=None,
+    smoothing_window=1,
+    cov=True,
+    abund=True,
+    se=True,
+    save=True,
+    ylim_set=(0, 0),
+):
+    set_up_plot(ylim_set)
+    for len in align_lens:
+        file_path = "{0}_{1}.csv".format(align_prefix, len)
+        if os.path.isfile(file_path):
+            rp = RefProfiles()
+            rp.load_single_ref_profiles(file_path, header=header, start=start, end=end)
+            if isinstance(header, list):
+                for h in header:
+                    single_plot(rp, h, start, end, smoothing_window, cov, abund, se)
+            else:
+                single_plot(rp, header, start, end, smoothing_window, cov, abund, se)
+        else:
+            print(f"File {file_path} not found. Skipping.")
+
+    if se:
+        plt.legend()
+
+    if save:
+        if isinstance(header, list):
+            save_file = align_prefix + "_" + "_".join(header) + ".png"
+        else:
+            save_file = align_prefix + "_" + header + ".png"
+        
+        # Include start and end positions in the filename if provided
+        if start is not None and end is not None:
+            save_file = save_file.replace('.png', f'_{start}_{end}.png')
+
+        plt.savefig(save_file)
+    plt.show()
 
 # command line interface for profile_plot
+#TODO: check start and stop positions are valid
 def main():
     parser = argparse.ArgumentParser(description="Plot abundance profiles")
     parser.add_argument("align_prefix", help="Prefix of alignment files")
@@ -542,6 +582,12 @@ def main():
         "-y", "--ylim", help="Set y-axis limit", type=int, nargs=2, default=(0, 0)
     )
     parser.add_argument("-n", "--no_save", help="Do not save plot", action="store_true")
+    parser.add_argument(
+        "-start", "--start", help="Start position for the subset", type=int
+    )
+    parser.add_argument(
+        "-end", "--end", help="End position for the subset", type=int
+    )
     args = parser.parse_args()
     if args.abundance:
         args.coverage = True
@@ -549,6 +595,8 @@ def main():
         args.align_prefix,
         args.align_lens,
         args.header,
+        args.start,
+        args.end,
         args.smoothing_window,
         args.coverage,
         args.abundance,

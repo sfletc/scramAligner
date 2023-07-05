@@ -248,7 +248,7 @@ class RefProfiles(object):
                     ) = row
 
                     # Skip alignments that do not match the input header or are outside the input positions
-                    if header and row_header != header:
+                    if header is not None and row_header != header:
                         continue
                     if start is not None and end is not None and (int(position) < start - padding or int(position) > end + padding):
                         continue
@@ -256,8 +256,11 @@ class RefProfiles(object):
                     # Construct a SingleAlignment object
                     srna = DNA(srna)
                     times_aligned = int(times_aligned)
-                    position = int(position) - start + padding  # New position relative to the start of the subset
-                    ref_len = end - start + 2 * padding  # New reference length
+                    ref_len = int(ref_len)
+                    position = int(position)
+                    if start is not None:
+                        position = position - start + padding  # New position relative to the start of the subset
+                        ref_len = end - start + 2 * padding  # New reference length
                     indv_alignments = np.array([float(x) for x in indv_alignments])
                     sa = SingleAlignment(
                         srna, position, strand, times_aligned, indv_alignments

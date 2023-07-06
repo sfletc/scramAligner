@@ -397,7 +397,7 @@ func RefLoad(refFile string) []*HeaderRef {
 			seq := refSeq.String()
 			singleHeaderRef = &HeaderRef{header, seq, reverseComplement(seq)}
 			refSlice = append(refSlice, singleHeaderRef)
-			header = fastaLine[1:]
+			header = strings.Split(fastaLine[1:], " ")[0]
 			refSeq.Reset()
 		case len(fastaLine) != 0:
 			refSeq.WriteString(strings.ToUpper(fastaLine))

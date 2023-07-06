@@ -246,7 +246,7 @@ class RefProfiles(object):
                         times_aligned,
                         *indv_alignments,
                     ) = row
-
+                    row_header = row_header.split()[0]
                     # Skip alignments that do not match the input header or are outside the input positions
                     if header is not None and row_header != header:
                         continue
@@ -254,6 +254,7 @@ class RefProfiles(object):
                         continue
 
                     # Construct a SingleAlignment object
+
                     srna = DNA(srna)
                     times_aligned = int(times_aligned)
                     ref_len = int(ref_len)

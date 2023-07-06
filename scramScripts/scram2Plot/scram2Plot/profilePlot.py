@@ -443,7 +443,7 @@ def single_plot(ref_profiles, header, start=None, end=None, smoothing_window=1, 
         spd = DataForPlot(ref_profiles, header)
 
         plt.plot(spd.x_axis, [0] * len(spd.x_axis), color="grey", linewidth=0.5)
-        
+        header = header.split()[0]
         title = f"Profile for {header}"
         if start is not None and end is not None:
             title += f" from position {start} to {end}"

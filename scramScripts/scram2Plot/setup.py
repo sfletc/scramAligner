@@ -9,8 +9,9 @@ setup(
     install_requires=[
         'matplotlib>=3.5',
         'pandas>=1.4.0',
-        'seaborn>=0.12.0',
         'numpy>=1.23.0',
+        'biopython>=1.79',
+        'viennarna>=2.4.18',
     ],
     entry_points={
         'console_scripts': [

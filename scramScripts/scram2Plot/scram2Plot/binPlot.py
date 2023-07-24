@@ -1,10 +1,8 @@
 import math
-import csv
 import argparse
 import sys
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from scram2Plot.profilePlot import RefProfiles

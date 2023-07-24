@@ -2,10 +2,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os.path
 import csv
-import seaborn as sns
-import pandas as pd
 import numpy as np
 import argparse
+from Bio import SeqIO
+import RNA
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 class DNA(object):
@@ -219,9 +221,9 @@ class RefProfiles(object):
             and self.srna_len == other.srna_len
         )
 
-
-
-    def load_single_ref_profiles(self, in_file, header=None, start=None, end=None, padding=30):
+    def load_single_ref_profiles(
+        self, in_file, header=None, start=None, end=None, padding=0
+    ):
         """Loads a scram2 profile file for a single sRNA length
 
         Args:
@@ -250,7 +252,14 @@ class RefProfiles(object):
                     # Skip alignments that do not match the input header or are outside the input positions
                     if header is not None and row_header != header:
                         continue
-                    if start is not None and end is not None and (int(position) < start - padding or int(position) > end + padding):
+                    if (
+                        start is not None
+                        and end is not None
+                        and (
+                            int(position) < start - padding
+                            or int(position) > end + padding
+                        )
+                    ):
                         continue
 
                     # Construct a SingleAlignment object
@@ -260,7 +269,9 @@ class RefProfiles(object):
                     ref_len = int(ref_len)
                     position = int(position)
                     if start is not None:
-                        position = position - start + padding  # New position relative to the start of the subset
+                        position = (
+                            position - start + padding
+                        )  # New position relative to the start of the subset
                         ref_len = end - start + 2 * padding  # New reference length
                     indv_alignments = np.array([float(x) for x in indv_alignments])
                     sa = SingleAlignment(
@@ -289,7 +300,44 @@ class RefProfiles(object):
             print(f"An error occurred while processing the input file {in_file}: {e}")
 
 
+class SectStruct(object):
+    """
+    Seconday structure data
+    """
 
+    def __init__(self, ref_file, header, start=None, end=None):
+        self.ref_file = ref_file
+        self.header = header
+        self.start = start
+        self.end = end
+        self.sequence = None
+        self.structure = None
+        self.pairs = []
+        self._get_sequence()
+        self.length = len(self.sequence)
+        self._get_structure()
+        self._get_pairs()
+
+    def _get_sequence(self):
+        for seq_record in SeqIO.parse(self.ref_file, "fasta"):
+            if seq_record.id == self.header:
+                if self.start is None or self.end is None:
+                    self.sequence = str(seq_record.seq)
+                else:
+                    self.sequence = str(seq_record.seq[self.start : self.end])
+
+    def _get_structure(self):
+        self.structure, _ = RNA.fold(self.sequence)
+
+    def _get_pairs(self):
+        stack = []
+        for i, char in enumerate(self.structure):
+            if char == "(":
+                stack.append(i + 1)  # index starts from 1
+            elif char == ")":
+                start = stack.pop()
+                end = i + 1  # index starts from 1
+                self.pairs.append((start, end))
 
 
 class DataForPlot(object):
@@ -415,17 +463,128 @@ class DataForPlot(object):
         )
 
 
-def set_up_plot(ylim_set):
+def align_plot(
+    align_prefix,
+    align_lens,
+    header,
+    start=None,
+    end=None,
+    smoothing_window=1,
+    cov=True,
+    abund=True,
+    se=True,
+    save=True,
+    ylim_set=(0, 0),
+    sec_structure=False,
+    ref_file=None,
+):
+    ss = None
+    if sec_structure:
+        ss = SectStruct(ref_file, header, start, end)
+    set_up_plot(ss)
+
+    all_handles = []
+    all_labels = []
+
+    for len in align_lens:
+        file_path = "{0}_{1}.csv".format(align_prefix, len)
+        if os.path.isfile(file_path):
+            rp = RefProfiles()
+            rp.load_single_ref_profiles(file_path, header=header, start=start, end=end)
+            if isinstance(header, list):
+                for h in header:
+                    ret = single_plot(
+                        rp, h, start, end, smoothing_window, cov, abund, se, ylim_set
+                    )
+                    if ret is not None:  # Checking if a valid return is obtained
+                        handles, labels = ret
+                        all_handles.extend(handles)
+                        all_labels.extend(labels)
+            else:
+                ret = single_plot(
+                    rp, header, start, end, smoothing_window, cov, abund, se, ylim_set
+                )
+                if ret is not None:  # Checking if a valid return is obtained
+                    handles, labels = ret
+                    all_handles.extend(handles)
+                    all_labels.extend(labels)
+        else:
+            print(f"File {file_path} not found. Skipping.")
+
+    if se:
+        # Create a legend with the combined handles and labels
+        plt.legend(all_handles, all_labels, loc="upper right")
+
+    if save:
+        if isinstance(header, list):
+            save_file = align_prefix + "_" + "_".join(header) + ".png"
+        else:
+            save_file = align_prefix + "_" + header + ".png"
+
+        # Include start and end positions in the filename if provided
+        if start is not None and end is not None:
+            save_file = save_file.replace(".png", f"_{start}_{end}.png")
+
+        plt.savefig(save_file)
+    plt.show()
+
+
+def set_up_plot(ss=None):
     """ """
-    plt.figure(figsize=(12, 6), dpi=300)
+    plt.figure(figsize=(12, 12), dpi=600)
     plt.xlabel("Position")
     plt.ylabel("Abundance")
-    plt.title("Abundance Profile")
-    if ylim_set != (0, 0):
-        plt.ylim(ylim_set[0], ylim_set[1])
+    plt.axis("equal")  # TODO: check
+
+    max_y = 0  # Variable to store maximum y value
+
+    if ss is not None:
+        for x1, x2 in ss.pairs:
+            # The two points
+            p1 = np.array([x1, 0])
+            p2 = np.array([x2, 0])
+
+            # The center of the circle
+            c = (p1 + p2) / 2
+
+            # The radius of the circle
+            r = np.linalg.norm(p1 - p2) / 2
+            # Updating max_y if current r is greater
+            max_y = max(max_y, r)
+
+            # The angles for the arc
+            t = np.linspace(0, np.pi, 100)
+
+            # Parametric equations for the circle
+            x = c[0] + r * np.cos(t)
+            y = c[1] + r * np.sin(t)
+
+            plt.plot(x, y, c="blue", linewidth=0.1, alpha=0.8)
+        plt.axis("equal")  # ensure the circle isn't distorted
+        plt.xlim(0, ss.length + 1)  # set x-axis limits based on sequence length
+
+    # Set symmetrical y-limits around 0
+    plt.ylim(-max_y, max_y)
+    plt.gca().set_yticks([])  # Hide y-axis ticks for the main y-axis
 
 
-def single_plot(ref_profiles, header, start=None, end=None, smoothing_window=1, cov=True, abund=True, se=True):
+def single_plot(
+    ref_profiles,
+    header,
+    start=None,
+    end=None,
+    smoothing_window=1,
+    cov=True,
+    abund=True,
+    se=True,
+    ylim_set=(0, 0),
+    padding=0,
+):
+    """Your single_plot function..."""
+
+    # Create the second axis
+    ax2 = plt.gca().twinx()
+    ax2.set_ylim(ylim_set[0], ylim_set[1])
     cols = {
         24: "darkgreen",
         21: "red",
@@ -443,12 +602,12 @@ def single_plot(ref_profiles, header, start=None, end=None, smoothing_window=1, 
     try:
         spd = DataForPlot(ref_profiles, header)
 
-        plt.plot(spd.x_axis, [0] * len(spd.x_axis), color="grey", linewidth=0.5)
+        ax2.plot(spd.x_axis, [0] * len(spd.x_axis), color="grey", linewidth=0.5)
         header = header.split()[0]
         title = f"Profile for {header}"
         if start is not None and end is not None:
             title += f" from position {start} to {end}"
-        plt.title(title)
+        ax2.set_title(title)
 
         if cov:
             if abund:
@@ -458,7 +617,7 @@ def single_plot(ref_profiles, header, start=None, end=None, smoothing_window=1, 
         if se:
             spd.convert_to_error_bounds()
             spd.flatten(smoothing_window)
-            plt.fill_between(
+            ax2.fill_between(
                 spd.x_axis,
                 spd.y_flat[0],
                 spd.y_flat[2],
@@ -466,7 +625,7 @@ def single_plot(ref_profiles, header, start=None, end=None, smoothing_window=1, 
                 alpha=0.4,
                 label=str(spd.srna_len) + " nt",
             )
-            plt.fill_between(
+            ax2.fill_between(
                 spd.x_axis,
                 spd.y_flat[1],
                 spd.y_flat[3],
@@ -478,7 +637,7 @@ def single_plot(ref_profiles, header, start=None, end=None, smoothing_window=1, 
             first = True
             for i in range(spd.replicates):
                 if first:
-                    plt.plot(
+                    ax2.plot(
                         spd.x_axis,
                         spd.y_flat[i],
                         spd.y_flat[i + spd.replicates],
@@ -488,14 +647,14 @@ def single_plot(ref_profiles, header, start=None, end=None, smoothing_window=1, 
                     )
                     first = False
                 else:
-                    plt.plot(
+                    ax2.plot(
                         spd.x_axis,
                         spd.y_flat[i],
                         spd.y_flat[i + spd.replicates],
                         color=cols[spd.srna_len],
                         alpha=0.8,
                     )
-                plt.fill_between(
+                ax2.fill_between(
                     spd.x_axis,
                     spd.y_flat[i],
                     spd.y_flat[i + spd.replicates],
@@ -503,8 +662,13 @@ def single_plot(ref_profiles, header, start=None, end=None, smoothing_window=1, 
                     alpha=0.05,
                 )
         if start is not None:
-            x_ticks = plt.xticks()[0] 
-            plt.xticks(x_ticks, [int(x + start - 30) for x in x_ticks])  # Adjusting for 30 bp padding
+            x_ticks = ax2.get_xticks()
+            ax2.set_xticks(
+                x_ticks, [int(x + start - padding) for x in x_ticks]
+            )  # Adjusting for 30 bp padding
+        ax2.yaxis.tick_right()
+        handles, labels = ax2.get_legend_handles_labels()
+        return handles, labels
     except:
         pass
 
@@ -522,51 +686,8 @@ def comma_separated_strings(value):
     return value.split(",")
 
 
-def align_plot(
-    align_prefix,
-    align_lens,
-    header,
-    start=None,
-    end=None,
-    smoothing_window=1,
-    cov=True,
-    abund=True,
-    se=True,
-    save=True,
-    ylim_set=(0, 0),
-):
-    set_up_plot(ylim_set)
-    for len in align_lens:
-        file_path = "{0}_{1}.csv".format(align_prefix, len)
-        if os.path.isfile(file_path):
-            rp = RefProfiles()
-            rp.load_single_ref_profiles(file_path, header=header, start=start, end=end)
-            if isinstance(header, list):
-                for h in header:
-                    single_plot(rp, h, start, end, smoothing_window, cov, abund, se)
-            else:
-                single_plot(rp, header, start, end, smoothing_window, cov, abund, se)
-        else:
-            print(f"File {file_path} not found. Skipping.")
-
-    if se:
-        plt.legend()
-
-    if save:
-        if isinstance(header, list):
-            save_file = align_prefix + "_" + "_".join(header) + ".png"
-        else:
-            save_file = align_prefix + "_" + header + ".png"
-        
-        # Include start and end positions in the filename if provided
-        if start is not None and end is not None:
-            save_file = save_file.replace('.png', f'_{start}_{end}.png')
-
-        plt.savefig(save_file)
-    plt.show()
-
 # command line interface for profile_plot
-#TODO: check start and stop positions are valid
+# TODO: check start and stop positions are valid
 def main():
     parser = argparse.ArgumentParser(description="Plot abundance profiles")
     parser.add_argument("align_prefix", help="Prefix of alignment files")
@@ -589,12 +710,26 @@ def main():
     parser.add_argument(
         "-start", "--start", help="Start position for the subset", type=int
     )
+    parser.add_argument("-end", "--end", help="End position for the subset", type=int)
     parser.add_argument(
-        "-end", "--end", help="End position for the subset", type=int
+        "--sec_structure", help="Plot secondary structure of reference sequence", action="store_true"
     )
+    parser.add_argument(
+        "--ref_file",
+        help="Alignment reference file (FASTA) for use in generating secondary structure",
+        type=str,
+        default=None,
+    )
+
     args = parser.parse_args()
+
+    # Error-checking condition
+    if args.sec_structure and args.ref_file is None:
+        parser.error("--ref_file is required when --sec_structure is set")
+
     if args.abundance:
         args.coverage = True
+
     align_plot(
         args.align_prefix,
         args.align_lens,
@@ -607,4 +742,10 @@ def main():
         args.error,
         not args.no_save,
         args.ylim,
+        args.sec_structure,
+        args.ref_file,
     )
+
+
+if __name__ == "__main__":
+    main()

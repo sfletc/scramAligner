@@ -564,7 +564,7 @@ def set_up_plot(ss=None):
         plt.xlim(0, ss.length + 1)  # set x-axis limits based on sequence length
 
     # Set symmetrical y-limits around 0
-    plt.ylim(-max_y, max_y)
+        plt.ylim(-max_y, max_y)
     plt.gca().set_yticks([])  # Hide y-axis ticks for the main y-axis
 
 
@@ -586,13 +586,15 @@ def single_plot(
     ax2 = plt.gca().twinx()
     ax2.set_ylim(ylim_set[0], ylim_set[1])
     cols = {
-        24: "darkgreen",
-        21: "red",
-        22: "blue",
+
+
         18: "#f781bf",
         19: "#a65628",
         20: "#984ea3",
+        21: "red",
+        22: "blue",
         23: "#999999",
+        24: "darkgreen",
         25: "brown",
         26: "#dede00",
         27: "orange",

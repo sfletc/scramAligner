@@ -477,10 +477,14 @@ def align_plot(
     ylim_set=(0, 0),
     sec_structure=False,
     ref_file=None,
+    show_seq=False,
 ):
     ss = None
     if sec_structure:
         ss = SectStruct(ref_file, header, start, end)
+        if show_seq:
+            print("Selected sequence:")
+            print(ss.sequence)
     set_up_plot(ss)
 
     all_handles = []
@@ -534,38 +538,40 @@ def set_up_plot(ss=None):
     plt.figure(figsize=(12, 12), dpi=600)
     plt.xlabel("Position")
     plt.ylabel("Abundance")
-    plt.axis("equal")  # TODO: check
-
-    max_y = 0  # Variable to store maximum y value
-
+    plt.axis("equal")  # TODO: check if needed
     if ss is not None:
-        for x1, x2 in ss.pairs:
-            # The two points
-            p1 = np.array([x1, 0])
-            p2 = np.array([x2, 0])
+        sec_struct_setup(ss)
+    plt.gca().set_yticks([])
 
-            # The center of the circle
-            c = (p1 + p2) / 2
 
-            # The radius of the circle
-            r = np.linalg.norm(p1 - p2) / 2
-            # Updating max_y if current r is greater
-            max_y = max(max_y, r)
+def sec_struct_setup(ss):
+    max_y = 0  # Variable to store maximum y value
+    for x1, x2 in ss.pairs:
+        # The two points
+        p1 = np.array([x1, 0])
+        p2 = np.array([x2, 0])
 
-            # The angles for the arc
-            t = np.linspace(0, np.pi, 100)
+        # The center of the circle
+        c = (p1 + p2) / 2
 
-            # Parametric equations for the circle
-            x = c[0] + r * np.cos(t)
-            y = c[1] + r * np.sin(t)
+        # The radius of the circle
+        r = np.linalg.norm(p1 - p2) / 2
+        # Updating max_y if current r is greater
+        max_y = max(max_y, r)
 
-            plt.plot(x, y, c="blue", linewidth=0.1, alpha=0.8)
-        plt.axis("equal")  # ensure the circle isn't distorted
-        plt.xlim(0, ss.length + 1)  # set x-axis limits based on sequence length
+        # The angles for the arc
+        t = np.linspace(0, np.pi, 100)
+
+        # Parametric equations for the circle
+        x = c[0] + r * np.cos(t)
+        y = c[1] + r * np.sin(t)
+
+        plt.plot(x, y, c="blue", linewidth=0.1, alpha=0.8)
+    plt.axis("equal")  # ensure the circle isn't distorted
+    plt.xlim(0, ss.length + 1)  # set x-axis limits based on sequence length
 
     # Set symmetrical y-limits around 0
-        plt.ylim(-max_y, max_y)
-    plt.gca().set_yticks([])  # Hide y-axis ticks for the main y-axis
+    plt.ylim(-max_y, max_y)  # Hide y-axis ticks for the main y-axis
 
 
 def single_plot(
@@ -577,17 +583,15 @@ def single_plot(
     cov=True,
     abund=True,
     se=True,
-    ylim_set=(0, 0),
+    ylim_set=0,
     padding=0,
 ):
     """Your single_plot function..."""
 
     # Create the second axis
     ax2 = plt.gca().twinx()
-    ax2.set_ylim(ylim_set[0], ylim_set[1])
+    ax2.set_ylim(-ylim_set, ylim_set)
     cols = {
-
-
         18: "#f781bf",
         19: "#a65628",
         20: "#984ea3",
@@ -706,7 +710,7 @@ def main():
     parser.add_argument("-a", "--abundance", help="Plot abundance", action="store_true")
     parser.add_argument("-e", "--error", help="Plot error", action="store_true")
     parser.add_argument(
-        "-y", "--ylim", help="Set y-axis limit", type=int, nargs=2, default=(0, 0)
+        "-y", "--ylim", help="Set y-axis limit", type=int, nargs=2, default=0
     )
     parser.add_argument("-n", "--no_save", help="Do not save plot", action="store_true")
     parser.add_argument(
@@ -714,7 +718,9 @@ def main():
     )
     parser.add_argument("-end", "--end", help="End position for the subset", type=int)
     parser.add_argument(
-        "--sec_structure", help="Plot secondary structure of reference sequence", action="store_true"
+        "--sec_structure",
+        help="Plot secondary structure of reference sequence",
+        action="store_true",
     )
     parser.add_argument(
         "--ref_file",

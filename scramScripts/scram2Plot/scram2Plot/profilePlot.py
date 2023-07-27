@@ -319,12 +319,34 @@ class SectStruct(object):
         self._get_pairs()
 
     def _get_sequence(self):
+        # Check if the reference file exists
+        if not os.path.isfile(self.ref_file):
+            raise FileNotFoundError(f"Reference file {self.ref_file} not found.")
+        
+        sequence_found = False
         for seq_record in SeqIO.parse(self.ref_file, "fasta"):
             if seq_record.id == self.header:
-                if self.start is None or self.end is None:
-                    self.sequence = str(seq_record.seq)
-                else:
+                sequence_found = True
+                
+                if self.start is not None and self.end is not None:
+                    # Check that start and end are within the bounds of the sequence
+                    if self.start < 0 or self.end > len(seq_record.seq):
+                        raise ValueError(f"Start and end positions must be within the bounds of the sequence (0, {len(seq_record.seq)})")
+                    
+                    # Check that end is after start
+                    if self.end <= self.start:
+                        raise ValueError(f"End position must be after start position")
+                    
                     self.sequence = str(seq_record.seq[self.start : self.end])
+                else:
+                    self.sequence = str(seq_record.seq)
+                
+                # Break the loop once the sequence is found
+                break
+        
+        # Check if the sequence was found
+        if not sequence_found:
+            raise ValueError(f"Sequence with header {self.header} not found in reference file.")
 
     def _get_structure(self):
         self.structure, _ = RNA.fold(self.sequence)
@@ -461,76 +483,6 @@ class DataForPlot(object):
             and np.array_equal(self.fwd, other.fwd)
             and np.array_equal(self.rvs, other.rvs)
         )
-
-
-def align_plot(
-    align_prefix,
-    align_lens,
-    header,
-    start=None,
-    end=None,
-    smoothing_window=1,
-    cov=True,
-    abund=True,
-    se=True,
-    save=True,
-    ylim_set=(0, 0),
-    sec_structure=False,
-    ref_file=None,
-    show_seq=False,
-):
-    ss = None
-    if sec_structure:
-        ss = SectStruct(ref_file, header, start, end)
-        if show_seq:
-            print("Selected sequence:")
-            print(ss.sequence)
-    set_up_plot(ss)
-
-    all_handles = []
-    all_labels = []
-
-    for len in align_lens:
-        file_path = "{0}_{1}.csv".format(align_prefix, len)
-        if os.path.isfile(file_path):
-            rp = RefProfiles()
-            rp.load_single_ref_profiles(file_path, header=header, start=start, end=end)
-            if isinstance(header, list):
-                for h in header:
-                    ret = single_plot(
-                        rp, h, start, end, smoothing_window, cov, abund, se, ylim_set
-                    )
-                    if ret is not None:  # Checking if a valid return is obtained
-                        handles, labels = ret
-                        all_handles.extend(handles)
-                        all_labels.extend(labels)
-            else:
-                ret = single_plot(
-                    rp, header, start, end, smoothing_window, cov, abund, se, ylim_set
-                )
-                if ret is not None:  # Checking if a valid return is obtained
-                    handles, labels = ret
-                    all_handles.extend(handles)
-                    all_labels.extend(labels)
-        else:
-            print(f"File {file_path} not found. Skipping.")
-
-    if se:
-        # Create a legend with the combined handles and labels
-        plt.legend(all_handles, all_labels, loc="upper right")
-
-    if save:
-        if isinstance(header, list):
-            save_file = align_prefix + "_" + "_".join(header) + ".png"
-        else:
-            save_file = align_prefix + "_" + header + ".png"
-
-        # Include start and end positions in the filename if provided
-        if start is not None and end is not None:
-            save_file = save_file.replace(".png", f"_{start}_{end}.png")
-
-        plt.savefig(save_file)
-    plt.show()
 
 
 def set_up_plot(ss=None):
@@ -690,6 +642,76 @@ def comma_separated_ints(value):
 
 def comma_separated_strings(value):
     return value.split(",")
+
+
+def align_plot(
+    align_prefix,
+    align_lens,
+    header,
+    start=None,
+    end=None,
+    smoothing_window=1,
+    cov=True,
+    abund=True,
+    se=True,
+    save=True,
+    ylim_set=(0, 0),
+    sec_structure=False,
+    ref_file=None,
+    show_seq=False,
+):
+    ss = None
+    if sec_structure:
+        ss = SectStruct(ref_file, header, start, end)
+        if show_seq:
+            print("Selected sequence:")
+            print(ss.sequence)
+    set_up_plot(ss)
+
+    all_handles = []
+    all_labels = []
+
+    for len in align_lens:
+        file_path = "{0}_{1}.csv".format(align_prefix, len)
+        if os.path.isfile(file_path):
+            rp = RefProfiles()
+            rp.load_single_ref_profiles(file_path, header=header, start=start, end=end)
+            if isinstance(header, list):
+                for h in header:
+                    ret = single_plot(
+                        rp, h, start, end, smoothing_window, cov, abund, se, ylim_set
+                    )
+                    if ret is not None:  # Checking if a valid return is obtained
+                        handles, labels = ret
+                        all_handles.extend(handles)
+                        all_labels.extend(labels)
+            else:
+                ret = single_plot(
+                    rp, header, start, end, smoothing_window, cov, abund, se, ylim_set
+                )
+                if ret is not None:  # Checking if a valid return is obtained
+                    handles, labels = ret
+                    all_handles.extend(handles)
+                    all_labels.extend(labels)
+        else:
+            print(f"File {file_path} not found. Skipping.")
+
+    if se:
+        # Create a legend with the combined handles and labels
+        plt.legend(all_handles, all_labels, loc="upper right")
+
+    if save:
+        if isinstance(header, list):
+            save_file = align_prefix + "_" + "_".join(header) + ".png"
+        else:
+            save_file = align_prefix + "_" + header + ".png"
+
+        # Include start and end positions in the filename if provided
+        if start is not None and end is not None:
+            save_file = save_file.replace(".png", f"_{start}_{end}.png")
+
+        plt.savefig(save_file)
+    plt.show()
 
 
 # command line interface for profile_plot

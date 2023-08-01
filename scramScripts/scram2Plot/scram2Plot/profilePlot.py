@@ -489,11 +489,16 @@ def set_up_plot(ss=None):
     """ """
     plt.figure(figsize=(12, 12), dpi=600)
     plt.xlabel("Position")
-    plt.ylabel("Abundance")
+    # plt.ylabel("Abundance")
     plt.axis("equal")  # TODO: check if needed
     if ss is not None:
         sec_struct_setup(ss)
     plt.gca().set_yticks([])
+    ax = plt.gca()
+
+# Set the y-label and move it to the left
+    ax.set_ylabel('Abundance')
+    ax.yaxis.set_label_coords(-0.04,0.5)
 
 
 def sec_struct_setup(ss):
@@ -518,7 +523,7 @@ def sec_struct_setup(ss):
         x = c[0] + r * np.cos(t)
         y = c[1] + r * np.sin(t)
 
-        plt.plot(x, y, c="blue", linewidth=0.1, alpha=0.8)
+        plt.plot(x, y, c="blue", linewidth=0.1, alpha=0.8, antialiased=True)
     plt.axis("equal")  # ensure the circle isn't distorted
     plt.xlim(0, ss.length + 1)  # set x-axis limits based on sequence length
 
@@ -625,6 +630,7 @@ def single_plot(
                 x_ticks, [int(x + start - padding) for x in x_ticks]
             )  # Adjusting for 30 bp padding
         ax2.yaxis.tick_right()
+        ax2.yaxis.set_label_coords(-0.1,0.5)
         handles, labels = ax2.get_legend_handles_labels()
         return handles, labels
     except:
@@ -702,13 +708,13 @@ def align_plot(
 
     if save:
         if isinstance(header, list):
-            save_file = align_prefix + "_" + "_".join(header) + ".png"
+            save_file = align_prefix + "_" + "_".join(header) + ".svg"
         else:
-            save_file = align_prefix + "_" + header + ".png"
+            save_file = align_prefix + "_" + header + ".svg"
 
         # Include start and end positions in the filename if provided
         if start is not None and end is not None:
-            save_file = save_file.replace(".png", f"_{start}_{end}.png")
+            save_file = save_file.replace(".svg", f"_{start}_{end}.svg")
 
         plt.savefig(save_file)
     plt.show()

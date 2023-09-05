@@ -661,7 +661,7 @@ def align_plot(
     abund=True,
     se=True,
     save=True,
-    ylim_set=(0, 0),
+    ylim_set=0,
     sec_structure=False,
     ref_file=None,
     show_seq=False,

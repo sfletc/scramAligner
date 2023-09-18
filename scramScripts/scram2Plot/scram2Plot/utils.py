@@ -2,6 +2,9 @@ import warnings
 import numpy as np
 import logomaker as lm
 from IPython.display import Image, display
+import pandas as pd
+import matplotlib.pyplot as plt
+
 
 warnings.filterwarnings("ignore", message=".*defaulting to pandas implementation*")
 warnings.filterwarnings("ignore", message=".*This may take some time*")
@@ -32,6 +35,7 @@ class ScramCSV:
         else:
             import pandas as pd
         self.pd = pd
+        self.srna_len=0
 
     def load_csv(self, file_path):
         """
@@ -41,6 +45,7 @@ class ScramCSV:
             file_path (str): The path to the CSV file to load.
         """
         self.df = self.pd.read_csv(file_path)
+        self.srna_len=int(file_path.split("_")[-1].split(".csv")[0])
 
     def subset_data(
         self,
@@ -123,7 +128,7 @@ class ScramCSV:
         # Create a new instance of the class with the filtered DataFrame
         filtered_instance = self.__class__()
         filtered_instance.df = filtered_df
-
+        filtered_instance.srna_len = self.srna_len
         return filtered_instance
 
     def remove_duplicates(self):
@@ -157,9 +162,17 @@ class ScramCSV:
         )
 
         logo = lm.Logo(info_mat)
+        # Ensure that x-axis ticks are integers starting at 1
+        xticks = np.arange(self.srna_len)  # Create an array of tick positions corresponding to the length of your data
+        xticks_labels = xticks + 1  # Add 1 to each tick position for the label
 
+        plt.xticks(xticks, labels=xticks_labels.astype(int))  # Set tick positions and labels
         # Display the logo
-        display(logo)
+        # Add title using matplotlib
+        plt.title("{1} nt sRNAs ({0} input sequences)".format(len(self.df),self.srna_len))
+
+        # Show the plot
+        plt.show()
 
         # Save the logo if save_path is specified
         if save_path is not None:

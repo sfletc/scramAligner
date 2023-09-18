@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='scram2Plot',
-    version='0.0.1',
+    version='0.0.2',
     packages=find_packages(),
     include_package_data=True,
     python_requires='>=3.7',
@@ -12,6 +12,10 @@ setup(
         'numpy>=1.23.0',
         'biopython>=1.79',
         'viennarna>=2.4.18',
+        'logomaker',
+        'modin',
+        'ray'
+
     ],
     entry_points={
         'console_scripts': [

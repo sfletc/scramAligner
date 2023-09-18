@@ -14,7 +14,8 @@ setup(
         'viennarna>=2.4.18',
         'logomaker',
         'modin',
-        'ray'
+        'ray>=2.7.0',
+        'grpcio'
 
     ],
     entry_points={

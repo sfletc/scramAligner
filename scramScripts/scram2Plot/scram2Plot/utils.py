@@ -4,6 +4,7 @@ import logomaker as lm
 from IPython.display import Image, display
 import pandas as pd
 import matplotlib.pyplot as plt
+import scram2Plot.profilePlot as pp
 
 
 warnings.filterwarnings("ignore", message=".*defaulting to pandas implementation*")
@@ -142,7 +143,7 @@ class ScramCSV:
 
         self.df = self.df.drop_duplicates(subset=["sRNA"])
 
-    def generate_sequence_logo(self, save_path=None):
+    def generate_sequence_logo(self, save_path=None, logo_type="information"):
         """
         Generates and displays a sequence logo from the data.
         
@@ -157,11 +158,15 @@ class ScramCSV:
         # Extract 'sRNA' sequences from the DataFrame
         seqs = self.df["sRNA"].tolist()
         counts_mat = lm.alignment_to_matrix(seqs, to_type="counts")
-        info_mat = lm.transform_matrix(
-            counts_mat, from_type="counts", to_type="information"
-        )
+        if logo_type == "information":
+            info_mat = lm.transform_matrix(
+                counts_mat, from_type="counts", to_type="information"
+            )
 
-        logo = lm.Logo(info_mat)
+            logo = lm.Logo(info_mat)
+        else:
+            logo = lm.Logo(counts_mat)
+
         # Ensure that x-axis ticks are integers starting at 1
         xticks = np.arange(self.srna_len)  # Create an array of tick positions corresponding to the length of your data
         xticks_labels = xticks + 1  # Add 1 to each tick position for the label
@@ -191,3 +196,28 @@ class ScramCSV:
             )
 
         self.df.to_csv(file_path, index=False)
+
+    def calculate_min_free_energy(self, ref_file, down=100, up=100):
+            """
+            Calculate the minimum free energy for each sRNA using the SectStruct class.
+            
+            Args:
+                ref_file (str): Path to the reference FASTA file.
+            """
+            if self.df is None:
+                raise ValueError("No data to operate on. Use load_csv or subset_data to load or filter data.")
+            
+            # Create empty columns to store calculated min_free_energy
+            self.df['Min_Free_Energy'] = np.nan
+
+            
+            for index, row in self.df.iterrows():
+                header = row['Header']
+                position = row['Position']
+                
+                # Initialize SectStruct object and get sequences
+                sect_struct = pp.SectStruct(ref_file, header, position-down, position+up)
+                
+                # Store the calculated min_free_energy in the DataFrame
+                self.df.at[index, 'Min_Free_Energy'] = sect_struct.min_free_energy
+

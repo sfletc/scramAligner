@@ -2,12 +2,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os.path
 import csv
-import numpy as np
 import argparse
 from Bio import SeqIO
 import RNA
-import matplotlib.pyplot as plt
-import numpy as np
+
+
 
 
 class DNA(object):
@@ -500,7 +499,14 @@ class DataForPlot(object):
         Args:
         - d: Degree of smoothing. Default is 1.
         """
-        # Code logic here
+        if d == 1:
+            for i in range(self.fwd.shape[1]):
+                self.y_flat.append(self.fwd[:, [i]].flatten())
+                self.y_flat.append(-self.rvs[:, [i]].flatten())
+        else:
+            for i in range(self.fwd.shape[1]):
+                self.y_flat.append(self._smoothTriangle(self.fwd[:, [i]].flatten(), d))
+                self.y_flat.append(self._smoothTriangle(-self.rvs[:, [i]].flatten(), d))
 
     @staticmethod
     def _smoothTriangle(data, degree):
@@ -514,7 +520,21 @@ class DataForPlot(object):
         Returns:
         - smoothed: Smoothed data.
         """
-        # Code logic here
+        triangle = np.concatenate(
+            (np.arange(degree + 1), np.arange(degree)[::-1])
+        )  # up then down
+        smoothed = []
+
+        for i in range(degree, len(data) - degree * 2):
+            point = data[i : i + len(triangle)] * triangle
+            smoothed.append(np.sum(point) / np.sum(triangle))
+        # Handle boundaries
+        smoothed = [smoothed[0]] * int(
+            degree + degree / 2
+        ) + smoothed  # TODO: this can be better
+        while len(smoothed) < len(data):
+            smoothed.append(smoothed[-1])
+        return smoothed
 
     def __str__(self):
         return "{0}\t{1}\t{2}\t{3}\t{4}".format(
@@ -634,6 +654,7 @@ def sec_struct_setup(ss):
     plt.ylim(-max_y, max_y)
 
 
+
 def single_plot(
     ref_profiles,
     header,
@@ -670,8 +691,15 @@ def single_plot(
     """
 
     # Create the second axis
-    ax2 = plt.gca().twinx()
+    ax1 = plt.gca()  # primary axis
+    
+    # Hide the y-axis labels and ticks for the primary axis
+    ax1.yaxis.set_ticklabels([])
+    ax1.yaxis.set_ticks([])
+    ax2 = ax1.twinx()
     ax2.set_ylim(-ylim_set, ylim_set)
+
+    ax2.yaxis.tick_left()
     cols = {
         18: "#f781bf",
         19: "#a65628",
@@ -753,7 +781,6 @@ def single_plot(
             ax2.set_xticks(
                 x_ticks, [int(x + start - padding) for x in x_ticks]
             )  # Adjusting for 30 bp padding
-        ax2.yaxis.tick_right()
         ax2.yaxis.set_label_coords(-0.1, 0.5)
         handles, labels = ax2.get_legend_handles_labels()
         return handles, labels
@@ -826,31 +853,38 @@ def align_plot(
 
     all_handles = []
     all_labels = []
+    if ylim_set ==0:
+        ylim_set = get_y_max(align_prefix, align_lens, header, start, end, smoothing_window, cov, abund, se, ylim_set)
+
+
 
     for len in align_lens:
-        file_path = "{0}_{1}.csv".format(align_prefix, len)
-        if os.path.isfile(file_path):
-            rp = RefProfiles()
-            rp.load_single_ref_profiles(file_path, header=header, start=start, end=end)
-            if isinstance(header, list):
-                for h in header:
+        try:
+            file_path = "{0}_{1}.csv".format(align_prefix, len)
+            if os.path.isfile(file_path):
+                rp = RefProfiles()
+                rp.load_single_ref_profiles(file_path, header=header, start=start, end=end)
+                if isinstance(header, list):
+                    for h in header:
+                        ret = single_plot(
+                            rp, h, start, end, smoothing_window, cov, abund, se, ylim_set
+                        )
+                        if ret is not None:
+                            handles, labels = ret
+                            all_handles.extend(handles)
+                            all_labels.extend(labels)
+                else:
                     ret = single_plot(
-                        rp, h, start, end, smoothing_window, cov, abund, se, ylim_set
+                        rp, header, start, end, smoothing_window, cov, abund, se, ylim_set
                     )
                     if ret is not None:
                         handles, labels = ret
                         all_handles.extend(handles)
                         all_labels.extend(labels)
             else:
-                ret = single_plot(
-                    rp, header, start, end, smoothing_window, cov, abund, se, ylim_set
-                )
-                if ret is not None:
-                    handles, labels = ret
-                    all_handles.extend(handles)
-                    all_labels.extend(labels)
-        else:
-            print(f"File {file_path} not found. Skipping.")
+                print(f"File {file_path} not found. Skipping.")
+        except:
+            pass
 
     if se:
         plt.legend(all_handles, all_labels, loc="upper right")
@@ -867,6 +901,45 @@ def align_plot(
         plt.savefig(save_file)
 
     plt.show()
+
+def get_y_max(align_prefix, align_lens, header, start, end, smoothing_window, cov, abund, se, ylim_set):
+    for len in align_lens:
+        try:
+            file_path = "{0}_{1}.csv".format(align_prefix, len)
+            if os.path.isfile(file_path):
+                rp = RefProfiles()
+                rp.load_single_ref_profiles(file_path, header=header, start=start, end=end)
+
+                if isinstance(header, list):
+                    for h in header:
+                        ylim_set = _parse_alignments(smoothing_window, cov, abund, se, ylim_set, rp, h)
+                else:
+                    ylim_set = _parse_alignments(smoothing_window, cov, abund, se, ylim_set, rp, header)
+            else:
+                print(f"File {file_path} not found. Skipping.")
+        except:
+            pass
+    return ylim_set*1.1
+
+def _parse_alignments(smoothing_window, cov, abund, se, ylim_set, rp, h):
+    spd = DataForPlot(rp, h)
+
+    if cov:
+
+        if abund:
+            spd.convert_to_coverage(abund=True)
+        else:
+            spd.convert_to_coverage(abund=False)
+    
+    if se:
+        spd.convert_to_error_bounds()
+        spd.flatten(smoothing_window)
+        ylim_set = max(ylim_set, max(spd.y_flat[2]), abs(min(spd.y_flat[3])))
+    else:
+        spd.flatten(smoothing_window)
+        for i in range(spd.replicates):
+            ylim_set = max(ylim_set, max(spd.y_flat[i]), abs(min(spd.y_flat[i + spd.replicates])))
+    return ylim_set
 
 
 def main():

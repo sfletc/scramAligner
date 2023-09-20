@@ -7,8 +7,6 @@ from Bio import SeqIO
 import RNA
 
 
-
-
 class DNA(object):
     """
     The DNA class represents a DNA sequence in a biological context.
@@ -558,234 +556,325 @@ class DataForPlot(object):
         )
 
 
-def set_up_plot(ss=None):
-    """
-    Sets up a matplotlib plot for displaying biological sequence data.
+class AlignmentPlot:
+    def __init__(
+        self,
+        align_prefix,
+        align_lens,
+        header,
+        start=None,
+        end=None,
+        smoothing_window=1,
+        cov=True,
+        abund=True,
+        se=True,
+        save=True,
+        ylim_set=0,
+        sec_structure=False,
+        ref_file=None,
+        show_seq=False,
+    ):
+        self.align_prefix = align_prefix
+        self.align_lens = align_lens
+        self.header = header
+        self.start = start
+        self.end = end
+        self.smoothing_window = smoothing_window
+        self.cov = cov
+        self.abund = abund
+        self.se = se
+        self.save = save
+        self.ylim_set = ylim_set
+        self.sec_structure = sec_structure
+        self.ref_file = ref_file
+        self.show_seq = show_seq
+        self.ss = None
+        self.all_handles = []
+        self.all_labels = []
 
-    Args:
-        ss (SectStruct, optional): A SectStruct object containing information about the secondary structure.
-                                   If provided, additional setup related to the secondary structure will be performed.
+    def set_up_plot(self):
+        """
+        Sets up a matplotlib plot for displaying biological sequence data.
+        """
+        # Create a new figure with specified size and DPI
+        plt.figure(figsize=(12, 12), dpi=600)
 
-    Notes:
-        - Creates a 12x12-inch plot with a DPI of 600.
-        - X-axis label is set to "Position".
-        - Y-axis label is set to "Abundance", and it is placed slightly to the left of the axis.
-        - Y-axis ticks are hidden.
-        - If a SectStruct object is provided, additional setup is performed via the `sec_struct_setup` function (not defined here).
-        - TODO: Verify if setting the axis to "equal" is necessary for your use case.
-    """
+        # Set the x-axis label
+        plt.xlabel("Position")
 
-    # Create a new figure with specified size and DPI
-    plt.figure(figsize=(12, 12), dpi=600)
+        # Make the x and y dimensions equal; TODO: Check if this is needed
+        plt.axis("equal")
 
-    # Set the x-axis label
-    plt.xlabel("Position")
+        # If a secondary structure object is provided, perform additional setup
+        if self.ss is not None:
+            self.sec_struct_setup()  # Note: `sec_struct_setup` needs to be defined as another method in this class
 
-    # Uncomment if you decide to keep the y-axis label as "Abundance"
-    # plt.ylabel("Abundance")
+        # Hide y-axis ticks
+        plt.gca().set_yticks([])
 
-    # Make the x and y dimensions equal; TODO: Check if this is needed
-    plt.axis("equal")
+        # Get the current axis and set the y-label
+        ax = plt.gca()
+        ax.set_ylabel("Abundance")
 
-    # If a secondary structure object is provided, perform additional setup
-    if ss is not None:
-        sec_struct_setup(ss)  # Note: `sec_struct_setup` needs to be defined elsewhere
+        # Move the y-label to the left
+        ax.yaxis.set_label_coords(-0.04, 0.5)
 
-    # Hide y-axis ticks
-    plt.gca().set_yticks([])
+    def sec_struct_setup(self):
+        """
+        Adds secondary structure information to an existing matplotlib plot.
+        """
+        max_y = 0  # Variable to store maximum y value
 
-    # Get the current axis and set the y-label
-    ax = plt.gca()
-    ax.set_ylabel("Abundance")
+        for x1, x2 in self.ss.pairs:
+            # Define the two points
+            p1 = np.array([x1, 0])
+            p2 = np.array([x2, 0])
 
-    # Move the y-label to the left
-    ax.yaxis.set_label_coords(-0.04, 0.5)
+            # Calculate the center of the circle
+            c = (p1 + p2) / 2
 
+            # Calculate the radius of the circle
+            r = np.linalg.norm(p1 - p2) / 2
+            # Update max_y if the current radius is greater
+            max_y = max(max_y, r)
 
-def sec_struct_setup(ss):
-    """
-    Adds secondary structure information to an existing matplotlib plot.
+            # Define the angles for the arc
+            t = np.linspace(0, np.pi, 100)
 
-    Args:
-        ss (SectStruct): A SectStruct object that contains information about
-                         the secondary structure of the sequence.
-                         Expected to have attributes 'pairs' and 'length'.
+            # Parametric equations for the circle
+            x = c[0] + r * np.cos(t)
+            y = c[1] + r * np.sin(t)
 
-    Notes:
-        - Plots arcs between paired nucleotide positions in the sequence.
-        - The arcs are plotted in blue with a linewidth of 0.1 and alpha of 0.8.
-        - The x-axis limits are set based on the sequence length.
-        - The y-axis limits are set symmetrically around 0, based on the maximum radius of the arcs.
-        - The aspect ratio is set to 'equal' to avoid distortion.
-    """
+            # Plot the arc
+            plt.plot(x, y, c="blue", linewidth=0.1, alpha=0.8, antialiased=True)
 
-    max_y = 0  # Variable to store maximum y value
+        # Ensure the circle isn't distorted
+        plt.axis("equal")
 
-    for x1, x2 in ss.pairs:
-        # Define the two points
-        p1 = np.array([x1, 0])
-        p2 = np.array([x2, 0])
+        # Set the x-axis limits based on sequence length
+        plt.xlim(0, self.ss.length + 1)
 
-        # Calculate the center of the circle
-        c = (p1 + p2) / 2
+        # Set symmetrical y-limits around 0
+        plt.ylim(-max_y, max_y)
 
-        # Calculate the radius of the circle
-        r = np.linalg.norm(p1 - p2) / 2
-        # Update max_y if the current radius is greater
-        max_y = max(max_y, r)
+    def generate_plot(self):
+        if self.sec_structure:
+            self.ss = SectStruct(self.ref_file, self.header, self.start, self.end)
+            if self.show_seq:
+                print("Selected sequence:")
+                print(self.ss.sequence)
 
-        # Define the angles for the arc
-        t = np.linspace(0, np.pi, 100)
+        self.set_up_plot()
 
-        # Parametric equations for the circle
-        x = c[0] + r * np.cos(t)
-        y = c[1] + r * np.sin(t)
+        if self.ylim_set == 0:
+            self.ylim_set = self.get_y_max()
 
-        # Plot the arc
-        plt.plot(x, y, c="blue", linewidth=0.1, alpha=0.8, antialiased=True)
+        for len in self.align_lens:
+            self.process_single_alignment(len)
 
-    # Ensure the circle isn't distorted
-    plt.axis("equal")
+        if self.se:
+            plt.legend(self.all_handles, self.all_labels, loc="upper right")
 
-    # Set the x-axis limits based on sequence length
-    plt.xlim(0, ss.length + 1)
+        if self.save:
+            self.save_plot()
 
-    # Set symmetrical y-limits around 0
-    plt.ylim(-max_y, max_y)
+        plt.show()
 
+    def get_y_max(self):
+        for len in self.align_lens:
+            self.process_single_alignment(len, get_max=True)
+        return self.ylim_set * 1.1
 
+    def process_single_alignment(self, len, get_max=False):
+        try:
+            file_path = f"{self.align_prefix}_{len}.csv"
+            if os.path.isfile(file_path):
+                rp = RefProfiles()
+                rp.load_single_ref_profiles(
+                    file_path, header=self.header, start=self.start, end=self.end
+                )
 
-def single_plot(
-    ref_profiles,
-    header,
-    start=None,
-    end=None,
-    smoothing_window=1,
-    cov=True,
-    abund=True,
-    se=True,
-    ylim_set=0,
-    padding=0,
-):
-    """
-    Plots the data for a single sequence based on its reference profiles.
+                if isinstance(self.header, list):
+                    for h in self.header:
+                        self.process_header(rp, h, get_max)
+                else:
+                    self.process_header(rp, self.header, get_max)
+            else:
+                print(f"File {file_path} not found. Skipping.")
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
-    Args:
-        ref_profiles (RefProfiles): The reference profiles object containing alignment and coverage data.
-        header (str): The header of the reference sequence.
-        start (int, optional): The start position in the sequence for the plot.
-        end (int, optional): The end position in the sequence for the plot.
-        smoothing_window (int, optional): The size of the smoothing window. Default is 1 (no smoothing).
-        cov (bool, optional): Whether to include coverage in the plot. Default is True.
-        abund (bool, optional): Whether to include abundance in the plot. Default is True.
-        se (bool, optional): Whether to include standard error bounds in the plot. Default is True.
-        ylim_set (int, optional): The y-limit for the plot. Default is 0 (automatically determined).
-        padding (int, optional): Padding to adjust the x-axis ticks. Default is 0.
+    def process_header(self, rp, h, get_max):
+        spd = DataForPlot(rp, h)
+        self._parse_alignments(spd, h, get_max)
+        ret = self.single_plot(rp, h)  # Calling single_plot here
+        if ret is not None:
+            handles, labels = ret
+            self.all_handles.extend(handles)
+            self.all_labels.extend(labels)
 
-    Returns:
-        tuple: A tuple containing handles and labels for the plot legend, if successful.
+    def _parse_alignments(self, spd, h, get_max):
+        if self.cov:
+            spd.convert_to_coverage(abund=self.abund)
 
-    Notes:
-        - Uses matplotlib for plotting.
-        - Fills between error bounds if `se` is True.
-    """
+        if self.se:
+            spd.convert_to_error_bounds()
+            spd.flatten(self.smoothing_window)
+            if get_max:
+                self.ylim_set = max(
+                    self.ylim_set, max(spd.y_flat[2]), abs(min(spd.y_flat[3]))
+                )
+            else:
+                # Call to single_plot method with SE
+                pass
+        else:
+            spd.flatten(self.smoothing_window)
+            if get_max:
+                for i in range(spd.replicates):
+                    self.ylim_set = max(
+                        self.ylim_set,
+                        max(spd.y_flat[i]),
+                        abs(min(spd.y_flat[i + spd.replicates])),
+                    )
+            else:
+                # Call to single_plot method without SE
+                pass
 
-    # Create the second axis
-    ax1 = plt.gca()  # primary axis
-    
-    # Hide the y-axis labels and ticks for the primary axis
-    ax1.yaxis.set_ticklabels([])
-    ax1.yaxis.set_ticks([])
-    ax2 = ax1.twinx()
-    ax2.set_ylim(-ylim_set, ylim_set)
+    def configure_plot_axes(self, ax1, ax2):
+        ax1.yaxis.set_ticklabels([])
+        ax1.yaxis.set_ticks([])
+        ax2.set_ylim(-self.ylim_set, self.ylim_set)
+        ax2.yaxis.tick_left()
 
-    ax2.yaxis.tick_left()
-    cols = {
-        18: "#f781bf",
-        19: "#a65628",
-        20: "#984ea3",
-        21: "red",
-        22: "blue",
-        23: "#999999",
-        24: "darkgreen",
-        25: "brown",
-        26: "#dede00",
-        27: "orange",
-        28: "yellow",
-    }
-
-    try:
-        spd = DataForPlot(ref_profiles, header)
-
-        ax2.plot(spd.x_axis, [0] * len(spd.x_axis), color="grey", linewidth=0.5)
+    def set_plot_title(self, ax2, header):
         header = header.split()[0]
         title = f"Profile for {header}"
-        if start is not None and end is not None:
-            title += f" from position {start} to {end}"
+        if self.start is not None and self.end is not None:
+            title += f" from position {self.start} to {self.end}"
         ax2.set_title(title)
 
-        if cov:
-            if abund:
-                spd.convert_to_coverage(abund=True)
-            else:
-                spd.convert_to_coverage(abund=False)
-        if se:
-            spd.convert_to_error_bounds()
-            spd.flatten(smoothing_window)
-            ax2.fill_between(
-                spd.x_axis,
-                spd.y_flat[0],
-                spd.y_flat[2],
-                color=cols[spd.srna_len],
-                alpha=0.4,
-                label=str(spd.srna_len) + " nt",
-            )
-            ax2.fill_between(
-                spd.x_axis,
-                spd.y_flat[1],
-                spd.y_flat[3],
-                color=cols[spd.srna_len],
-                alpha=0.4,
-            )
-        else:
-            spd.flatten(smoothing_window)
-            first = True
-            for i in range(spd.replicates):
-                if first:
-                    ax2.plot(
-                        spd.x_axis,
-                        spd.y_flat[i],
-                        spd.y_flat[i + spd.replicates],
-                        color=cols[spd.srna_len],
-                        alpha=0.8,
-                        label=str(spd.srna_len) + " nt",
-                    )
-                    first = False
-                else:
-                    ax2.plot(
-                        spd.x_axis,
-                        spd.y_flat[i],
-                        spd.y_flat[i + spd.replicates],
-                        color=cols[spd.srna_len],
-                        alpha=0.8,
-                    )
-                ax2.fill_between(
+    def plot_with_error_bounds(self, ax2, spd, cols):
+        spd.convert_to_error_bounds()
+        spd.flatten(self.smoothing_window)
+        ax2.fill_between(
+            spd.x_axis,
+            spd.y_flat[0],
+            spd.y_flat[2],
+            color=cols[spd.srna_len],
+            alpha=0.4,
+            label=str(spd.srna_len) + " nt",
+        )
+        ax2.fill_between(
+            spd.x_axis,
+            spd.y_flat[1],
+            spd.y_flat[3],
+            color=cols[spd.srna_len],
+            alpha=0.4,
+        )
+
+    def plot_without_error_bounds(self, ax2, spd, cols):
+        spd.flatten(self.smoothing_window)
+        first = True
+        for i in range(spd.replicates):
+            if first:
+                ax2.plot(
                     spd.x_axis,
                     spd.y_flat[i],
                     spd.y_flat[i + spd.replicates],
                     color=cols[spd.srna_len],
-                    alpha=0.05,
+                    alpha=0.8,
+                    label=str(spd.srna_len) + " nt",
                 )
-        if start is not None:
-            x_ticks = ax2.get_xticks()
-            ax2.set_xticks(
-                x_ticks, [int(x + start - padding) for x in x_ticks]
-            )  # Adjusting for 30 bp padding
-        ax2.yaxis.set_label_coords(-0.1, 0.5)
-        handles, labels = ax2.get_legend_handles_labels()
-        return handles, labels
-    except:
-        pass
+                first = False
+            else:
+                ax2.plot(
+                    spd.x_axis,
+                    spd.y_flat[i],
+                    spd.y_flat[i + spd.replicates],
+                    color=cols[spd.srna_len],
+                    alpha=0.8,
+                )
+            ax2.fill_between(
+                spd.x_axis,
+                spd.y_flat[i],
+                spd.y_flat[i + spd.replicates],
+                color=cols[spd.srna_len],
+                alpha=0.05,
+            )
+
+
+    def single_plot(self, ref_profiles, header):
+        """
+        Plots the data for a single sequence based on its reference profiles.
+        """
+
+        ax1 = plt.gca()  # primary axis
+        ax2 = ax1.twinx()  # secondary axis
+
+        self.configure_plot_axes(ax1, ax2)
+
+        ax2.yaxis.tick_left()
+        cols = {
+            18: "#f781bf",
+            19: "#a65628",
+            20: "#984ea3",
+            21: "red",
+            22: "blue",
+            23: "#999999",
+            24: "darkgreen",
+            25: "brown",
+            26: "#dede00",
+            27: "orange",
+            28: "yellow",
+        }
+
+        try:
+            spd = DataForPlot(ref_profiles, header)
+            ax2.plot(spd.x_axis, [0] * len(spd.x_axis), color="grey", linewidth=0.5)
+
+            self.set_plot_title(ax2, header)
+
+            if self.cov:
+                spd.convert_to_coverage(abund=self.abund)
+
+            if self.se:
+                self.plot_with_error_bounds(ax2, spd, cols)
+            else:
+                self.plot_without_error_bounds(ax2, spd, cols)
+
+            if self.start is not None:
+                x_ticks = ax2.get_xticks()
+                ax2.set_xticks(x_ticks, [int(x + self.start) for x in x_ticks])
+
+            ax2.yaxis.set_label_coords(-0.1, 0.5)
+            handles, labels = ax2.get_legend_handles_labels()
+            self.all_handles.extend(handles)
+            self.all_labels.extend(labels)
+            return handles, labels
+
+        except Exception as e:
+            print(f"An error occurred while plotting: {e}")
+
+    def process_header(self, rp, h, get_max):
+        spd = DataForPlot(rp, h)
+        self._parse_alignments(spd, h, get_max)
+        ret = self.single_plot(rp, h)  # Calling single_plot here
+        if ret is not None:
+            handles, labels = ret
+            self.all_handles.extend(handles)
+            self.all_labels.extend(labels)
+    
+    
+    def save_plot(self):
+        if isinstance(self.header, list):
+            save_file = self.align_prefix + "_" + "_".join(self.header) + ".svg"
+        else:
+            save_file = self.align_prefix + "_" + self.header + ".svg"
+
+        if self.start is not None and self.end is not None:
+            save_file = save_file.replace(".svg", f"_{self.start}_{self.end}.svg")
+
+        plt.savefig(save_file)
 
 
 def comma_separated_ints(value):
@@ -799,147 +888,6 @@ def comma_separated_ints(value):
 
 def comma_separated_strings(value):
     return value.split(",")
-
-
-def align_plot(
-    align_prefix,
-    align_lens,
-    header,
-    start=None,
-    end=None,
-    smoothing_window=1,
-    cov=True,
-    abund=True,
-    se=True,
-    save=True,
-    ylim_set=0,
-    sec_structure=False,
-    ref_file=None,
-    show_seq=False,
-):
-    """
-    Generates an alignment plot for given sequence lengths and saves the plot as SVG.
-
-    Args:
-        align_prefix (str): Prefix for alignment files.
-        align_lens (list of int): List of sequence lengths to include in the plot.
-        header (str or list of str): Header(s) identifying the sequences.
-        start (int, optional): Start position for the plot.
-        end (int, optional): End position for the plot.
-        smoothing_window (int, optional): Smoothing window size. Default is 1.
-        cov (bool, optional): Include coverage data in the plot. Default is True.
-        abund (bool, optional): Include abundance data in the plot. Default is True.
-        se (bool, optional): Include standard error in the plot. Default is True.
-        save (bool, optional): Save the plot as an SVG file. Default is True.
-        ylim_set (int, optional): Y-axis limit. Default is 0.
-        sec_structure (bool, optional): Plot secondary structure. Default is False.
-        ref_file (str, optional): Reference file for secondary structure.
-        show_seq (bool, optional): Print the selected sequence to the console. Default is False.
-
-    Notes:
-        - Assumes the existence of a `RefProfiles` class for loading data.
-        - Assumes the existence of a `single_plot` function for plotting individual sequences.
-        - Assumes the existence of a `SectStruct` class for handling secondary structures, if applicable.
-    """
-    ss = None
-    if sec_structure:
-        ss = SectStruct(ref_file, header, start, end)
-        if show_seq:
-            print("Selected sequence:")
-            print(ss.sequence)
-
-    # Set up the plot
-    set_up_plot(ss)
-
-    all_handles = []
-    all_labels = []
-    if ylim_set ==0:
-        ylim_set = get_y_max(align_prefix, align_lens, header, start, end, smoothing_window, cov, abund, se, ylim_set)
-
-
-
-    for len in align_lens:
-        try:
-            file_path = "{0}_{1}.csv".format(align_prefix, len)
-            if os.path.isfile(file_path):
-                rp = RefProfiles()
-                rp.load_single_ref_profiles(file_path, header=header, start=start, end=end)
-                if isinstance(header, list):
-                    for h in header:
-                        ret = single_plot(
-                            rp, h, start, end, smoothing_window, cov, abund, se, ylim_set
-                        )
-                        if ret is not None:
-                            handles, labels = ret
-                            all_handles.extend(handles)
-                            all_labels.extend(labels)
-                else:
-                    ret = single_plot(
-                        rp, header, start, end, smoothing_window, cov, abund, se, ylim_set
-                    )
-                    if ret is not None:
-                        handles, labels = ret
-                        all_handles.extend(handles)
-                        all_labels.extend(labels)
-            else:
-                print(f"File {file_path} not found. Skipping.")
-        except:
-            pass
-
-    if se:
-        plt.legend(all_handles, all_labels, loc="upper right")
-
-    if save:
-        if isinstance(header, list):
-            save_file = align_prefix + "_" + "_".join(header) + ".svg"
-        else:
-            save_file = align_prefix + "_" + header + ".svg"
-
-        if start is not None and end is not None:
-            save_file = save_file.replace(".svg", f"_{start}_{end}.svg")
-
-        plt.savefig(save_file)
-
-    plt.show()
-
-def get_y_max(align_prefix, align_lens, header, start, end, smoothing_window, cov, abund, se, ylim_set):
-    for len in align_lens:
-        try:
-            file_path = "{0}_{1}.csv".format(align_prefix, len)
-            if os.path.isfile(file_path):
-                rp = RefProfiles()
-                rp.load_single_ref_profiles(file_path, header=header, start=start, end=end)
-
-                if isinstance(header, list):
-                    for h in header:
-                        ylim_set = _parse_alignments(smoothing_window, cov, abund, se, ylim_set, rp, h)
-                else:
-                    ylim_set = _parse_alignments(smoothing_window, cov, abund, se, ylim_set, rp, header)
-            else:
-                print(f"File {file_path} not found. Skipping.")
-        except:
-            pass
-    return ylim_set*1.1
-
-def _parse_alignments(smoothing_window, cov, abund, se, ylim_set, rp, h):
-    spd = DataForPlot(rp, h)
-
-    if cov:
-
-        if abund:
-            spd.convert_to_coverage(abund=True)
-        else:
-            spd.convert_to_coverage(abund=False)
-    
-    if se:
-        spd.convert_to_error_bounds()
-        spd.flatten(smoothing_window)
-        ylim_set = max(ylim_set, max(spd.y_flat[2]), abs(min(spd.y_flat[3])))
-    else:
-        spd.flatten(smoothing_window)
-        for i in range(spd.replicates):
-            ylim_set = max(ylim_set, max(spd.y_flat[i]), abs(min(spd.y_flat[i + spd.replicates])))
-    return ylim_set
 
 
 def main():
@@ -1000,22 +948,25 @@ def main():
     if args.abundance:
         args.coverage = True
 
-    # Call the align_plot function with the parsed arguments
-    align_plot(
-        args.align_prefix,
-        args.align_lens,
-        args.header,
-        args.start,
-        args.end,
-        args.smoothing_window,
-        args.coverage,
-        args.abundance,
-        args.error,
-        not args.no_save,
-        args.ylim,
-        args.sec_structure,
-        args.ref_file,
+    # Create an instance of AlignmentPlot
+    plotter = AlignmentPlot(
+        align_prefix=args.align_prefix,
+        align_lens=args.align_lens,
+        header=args.header,
+        start=args.start,
+        end=args.end,
+        smoothing_window=args.smoothing_window,
+        cov=args.coverage,
+        abund=args.abundance,
+        se=args.error,
+        save=not args.no_save,
+        ylim_set=args.ylim,
+        sec_structure=args.sec_structure,
+        ref_file=args.ref_file,
     )
+
+    # Generate the plot
+    plotter.generate_plot()
 
 
 # Note: Add the following lines to trigger the main() function when the script is executed:

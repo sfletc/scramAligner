@@ -707,11 +707,6 @@ class AlignmentPlot:
     def process_header(self, rp, h, get_max):
         spd = DataForPlot(rp, h)
         self._parse_alignments(spd, h, get_max)
-        ret = self.single_plot(rp, h)  # Calling single_plot here
-        if ret is not None:
-            handles, labels = ret
-            self.all_handles.extend(handles)
-            self.all_labels.extend(labels)
 
     def _parse_alignments(self, spd, h, get_max):
         if self.cov:
@@ -725,8 +720,7 @@ class AlignmentPlot:
                     self.ylim_set, max(spd.y_flat[2]), abs(min(spd.y_flat[3]))
                 )
             else:
-                # Call to single_plot method with SE
-                pass
+                self.single_plot(spd, h)  # Call single_plot only if get_max is False
         else:
             spd.flatten(self.smoothing_window)
             if get_max:
@@ -737,8 +731,55 @@ class AlignmentPlot:
                         abs(min(spd.y_flat[i + spd.replicates])),
                     )
             else:
-                # Call to single_plot method without SE
-                pass
+                self.single_plot(spd, h)  # Call single_plot only if get_max is False
+
+    def single_plot(self, spd, header):
+        """
+        Plots the data for a single sequence based on its reference profiles.
+        """
+        ax1 = plt.gca()  # primary axis
+        ax2 = ax1.twinx()  # secondary axis
+
+        self.configure_plot_axes(ax1, ax2)
+        ax2.yaxis.tick_left()
+        cols = {
+            18: "#f781bf",
+            19: "#a65628",
+            20: "#984ea3",
+            21: "red",
+            22: "blue",
+            23: "#999999",
+            24: "darkgreen",
+            25: "brown",
+            26: "#dede00",
+            27: "orange",
+            28: "yellow",
+        }
+
+        try:
+            ax2.plot(spd.x_axis, [0] * len(spd.x_axis), color="grey", linewidth=0.5)
+            self.set_plot_title(ax2, header)
+
+            if self.cov:
+                spd.convert_to_coverage(abund=self.abund)
+
+            if self.se:
+                self.plot_with_error_bounds(ax2, spd, cols)
+            else:
+                self.plot_without_error_bounds(ax2, spd, cols)
+
+            if self.start is not None:
+                x_ticks = ax2.get_xticks()
+                ax2.set_xticks(x_ticks, [int(x + self.start) for x in x_ticks])
+
+            ax2.yaxis.set_label_coords(-0.1, 0.5)
+            handles, labels = ax2.get_legend_handles_labels()
+            self.all_handles.extend(handles)
+            self.all_labels.extend(labels)
+            return handles, labels
+
+        except Exception as e:
+            print(f"An error occurred while plotting: {e}")
 
     def configure_plot_axes(self, ax1, ax2):
         ax1.yaxis.set_ticklabels([])
@@ -802,69 +843,6 @@ class AlignmentPlot:
                 alpha=0.05,
             )
 
-
-    def single_plot(self, ref_profiles, header):
-        """
-        Plots the data for a single sequence based on its reference profiles.
-        """
-
-        ax1 = plt.gca()  # primary axis
-        ax2 = ax1.twinx()  # secondary axis
-
-        self.configure_plot_axes(ax1, ax2)
-
-        ax2.yaxis.tick_left()
-        cols = {
-            18: "#f781bf",
-            19: "#a65628",
-            20: "#984ea3",
-            21: "red",
-            22: "blue",
-            23: "#999999",
-            24: "darkgreen",
-            25: "brown",
-            26: "#dede00",
-            27: "orange",
-            28: "yellow",
-        }
-
-        try:
-            spd = DataForPlot(ref_profiles, header)
-            ax2.plot(spd.x_axis, [0] * len(spd.x_axis), color="grey", linewidth=0.5)
-
-            self.set_plot_title(ax2, header)
-
-            if self.cov:
-                spd.convert_to_coverage(abund=self.abund)
-
-            if self.se:
-                self.plot_with_error_bounds(ax2, spd, cols)
-            else:
-                self.plot_without_error_bounds(ax2, spd, cols)
-
-            if self.start is not None:
-                x_ticks = ax2.get_xticks()
-                ax2.set_xticks(x_ticks, [int(x + self.start) for x in x_ticks])
-
-            ax2.yaxis.set_label_coords(-0.1, 0.5)
-            handles, labels = ax2.get_legend_handles_labels()
-            self.all_handles.extend(handles)
-            self.all_labels.extend(labels)
-            return handles, labels
-
-        except Exception as e:
-            print(f"An error occurred while plotting: {e}")
-
-    def process_header(self, rp, h, get_max):
-        spd = DataForPlot(rp, h)
-        self._parse_alignments(spd, h, get_max)
-        ret = self.single_plot(rp, h)  # Calling single_plot here
-        if ret is not None:
-            handles, labels = ret
-            self.all_handles.extend(handles)
-            self.all_labels.extend(labels)
-    
-    
     def save_plot(self):
         if isinstance(self.header, list):
             save_file = self.align_prefix + "_" + "_".join(self.header) + ".svg"

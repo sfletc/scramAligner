@@ -576,6 +576,7 @@ class AlignmentPlot:
         ref_file (str, optional): Reference file for secondary structure. Defaults to None.
         show_seq (bool, optional): Whether to show the sequence. Defaults to False.
     """
+
     def __init__(
         self,
         align_prefix,
@@ -705,7 +706,7 @@ class AlignmentPlot:
     def get_y_max(self):
         """
         Get the maximum value for the y-axis based on the data.
-        
+
         Returns:
             float: The maximum y-axis value multiplied by 1.1 for padding.
         """

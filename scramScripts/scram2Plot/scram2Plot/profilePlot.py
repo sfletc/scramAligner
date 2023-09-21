@@ -557,6 +557,25 @@ class DataForPlot(object):
 
 
 class AlignmentPlot:
+    """
+    A class for generating alignment plots of biological sequence data.
+
+    Attributes:
+        align_prefix (str): Prefix for the alignment files.
+        align_lens (list): List of alignment lengths.
+        header (str or list): Header for the sequence or list of headers.
+        start (int, optional): Start position for the sequence. Defaults to None.
+        end (int, optional): End position for the sequence. Defaults to None.
+        smoothing_window (int, optional): Window size for smoothing. Defaults to 1.
+        cov (bool, optional): Whether to convert to coverage. Defaults to True.
+        abund (bool, optional): Whether to include abundance data. Defaults to True.
+        se (bool, optional): Whether to include standard error bounds. Defaults to True.
+        save (bool, optional): Whether to save the plot. Defaults to True.
+        ylim_set (float, optional): Set y-axis limits. Defaults to 0.
+        sec_structure (bool, optional): Whether to include secondary structure. Defaults to False.
+        ref_file (str, optional): Reference file for secondary structure. Defaults to None.
+        show_seq (bool, optional): Whether to show the sequence. Defaults to False.
+    """
     def __init__(
         self,
         align_prefix,
@@ -658,6 +677,9 @@ class AlignmentPlot:
         plt.ylim(-max_y, max_y)
 
     def generate_plot(self):
+        """
+        Generate the alignment plot based on the provided configurations.
+        """
         if self.sec_structure:
             self.ss = SectStruct(self.ref_file, self.header, self.start, self.end)
             if self.show_seq:
@@ -681,13 +703,26 @@ class AlignmentPlot:
         plt.show()
 
     def get_y_max(self):
+        """
+        Get the maximum value for the y-axis based on the data.
+        
+        Returns:
+            float: The maximum y-axis value multiplied by 1.1 for padding.
+        """
         for len in self.align_lens:
             self.process_single_alignment(len, get_max=True)
         return self.ylim_set * 1.1
 
-    def process_single_alignment(self, len, get_max=False):
+    def process_single_alignment(self, srna_len, get_max=False):
+        """
+        Processes a single alignment file.
+
+        Args:
+            len (int): The length of the alignment.
+            get_max (bool, optional): Whether to only get the maximum y-axis value. Defaults to False.
+        """
         try:
-            file_path = f"{self.align_prefix}_{len}.csv"
+            file_path = f"{self.align_prefix}_{srna_len}.csv"
             if os.path.isfile(file_path):
                 rp = RefProfiles()
                 rp.load_single_ref_profiles(
@@ -705,10 +740,26 @@ class AlignmentPlot:
             print(f"An error occurred: {e}")
 
     def process_header(self, rp, h, get_max):
+        """
+        Processes the header information for a given alignment.
+
+        Args:
+            rp (RefProfiles): An instance of the RefProfiles class.
+            h (str): The header of the sequence.
+            get_max (bool): Whether to only get the maximum y-axis value.
+        """
         spd = DataForPlot(rp, h)
         self._parse_alignments(spd, h, get_max)
 
     def _parse_alignments(self, spd, h, get_max):
+        """
+        Private method for parsing alignments.
+
+        Args:
+            spd (DataForPlot): An instance of the DataForPlot class.
+            h (str): The header of the sequence.
+            get_max (bool): Whether to only get the maximum y-axis value.
+        """
         if self.cov:
             spd.convert_to_coverage(abund=self.abund)
 
@@ -736,6 +787,10 @@ class AlignmentPlot:
     def single_plot(self, spd, header):
         """
         Plots the data for a single sequence based on its reference profiles.
+
+        Args:
+            spd (DataForPlot): An instance of the DataForPlot class.
+            header (str): The header of the sequence.
         """
         ax1 = plt.gca()  # primary axis
         ax2 = ax1.twinx()  # secondary axis
@@ -766,7 +821,7 @@ class AlignmentPlot:
             if self.se:
                 self.plot_with_error_bounds(ax2, spd, cols)
             else:
-                self.plot_without_error_bounds(ax2, spd, cols)
+                self.plot_reps_individually(ax2, spd, cols)
 
             if self.start is not None:
                 x_ticks = ax2.get_xticks()
@@ -782,12 +837,26 @@ class AlignmentPlot:
             print(f"An error occurred while plotting: {e}")
 
     def configure_plot_axes(self, ax1, ax2):
+        """
+        Configures the primary and secondary axes of the plot.
+
+        Args:
+            ax1: The primary axis.
+            ax2: The secondary axis.
+        """
         ax1.yaxis.set_ticklabels([])
         ax1.yaxis.set_ticks([])
         ax2.set_ylim(-self.ylim_set, self.ylim_set)
         ax2.yaxis.tick_left()
 
     def set_plot_title(self, ax2, header):
+        """
+        Sets the title of the plot.
+
+        Args:
+            ax2: The secondary axis.
+            header (str): The header of the sequence.
+        """
         header = header.split()[0]
         title = f"Profile for {header}"
         if self.start is not None and self.end is not None:
@@ -795,6 +864,14 @@ class AlignmentPlot:
         ax2.set_title(title)
 
     def plot_with_error_bounds(self, ax2, spd, cols):
+        """
+        Plots the data with error bounds.
+
+        Args:
+            ax2: The secondary axis.
+            spd (DataForPlot): An instance of the DataForPlot class.
+            cols (dict): Dictionary of colors.
+        """
         spd.convert_to_error_bounds()
         spd.flatten(self.smoothing_window)
         ax2.fill_between(
@@ -813,7 +890,15 @@ class AlignmentPlot:
             alpha=0.4,
         )
 
-    def plot_without_error_bounds(self, ax2, spd, cols):
+    def plot_reps_individually(self, ax2, spd, cols):
+        """
+        Plots the data without error bounds.
+
+        Args:
+            ax2: The secondary axis.
+            spd (DataForPlot): An instance of the DataForPlot class.
+            cols (dict): Dictionary of colors.
+        """
         spd.flatten(self.smoothing_window)
         first = True
         for i in range(spd.replicates):
@@ -856,6 +941,9 @@ class AlignmentPlot:
 
 
 def comma_separated_ints(value):
+    """
+    Saves the generated plot as an SVG file.
+    """
     try:
         return [int(v) for v in value.split(",")]
     except ValueError:

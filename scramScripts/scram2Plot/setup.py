@@ -14,7 +14,7 @@ setup(
         'viennarna>=2.4.18',
         'logomaker',
         'modin',
-        'ray>=2.7.0',
+        # 'ray>=2.7.0',
         'grpcio'
 
     ],

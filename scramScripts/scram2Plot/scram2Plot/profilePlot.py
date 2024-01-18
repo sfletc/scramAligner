@@ -4,7 +4,7 @@ import os.path
 import csv
 import argparse
 from Bio import SeqIO
-import RNA
+from ViennaRNA import RNA
 
 
 class DNA(object):

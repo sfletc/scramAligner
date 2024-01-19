@@ -287,6 +287,7 @@ class RefProfiles(object):
                     self.single_ref_profiles[row_header].all_alignments.append(sa)
 
                 # Set the number of replicates based on the last read alignment
+
                 if "sa" in locals():
                     self.replicates = len(sa.indv_alignments)
                 else:
@@ -729,12 +730,7 @@ class AlignmentPlot:
                 rp.load_single_ref_profiles(
                     file_path, header=self.header, start=self.start, end=self.end
                 )
-
-                if isinstance(self.header, list):
-                    for h in self.header:
-                        self.process_header(rp, h, get_max)
-                else:
-                    self.process_header(rp, self.header, get_max)
+                self.process_header(rp, self.header, get_max)
             else:
                 print(f"File {file_path} not found. Skipping.")
         except Exception as e:
@@ -975,7 +971,7 @@ def main():
         help="Comma-separated list of siRNA lengths to plot",
         type=comma_separated_ints,
     )
-    parser.add_argument("header", help="Header of plot", type=comma_separated_strings)
+    parser.add_argument("header", help="Reference header to plot", type=str)
 
     # Optional arguments
     parser.add_argument(

@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from scram2Plot.profilePlot import RefProfiles
-
+# from scram2Plot.profilePlot import RefProfiles
+from profilePlot import RefProfiles
 
 def get_bin_data(srp, bin_size):
     """
@@ -96,7 +96,9 @@ def show_plot(
     It takes in several parameters including a list of dataframes, a scale factor for the x-axis, a filename (optional),
     minimum and maximum y-axis values (optional), and a dictionary of colors for the legend (optional).
     """
+
     plt.axhline(0, color="black")
+
     if y_min is None or y_max is None:  # If y-axis limits are not provided
         y_abs_max = (
             max(max(df["mean"] + df["se"]) for df in dataframes) * 1.1
@@ -106,6 +108,7 @@ def show_plot(
         if y_max is None:
             y_max = y_abs_max
     plt.ylim(y_min, y_max)
+
     num_bins = max(df["bin"].max() for df in dataframes) + 1
     ticks = np.linspace(0, num_bins - 1, 10).astype(int)
     scaled_ticks = ticks * scale_factor
@@ -115,14 +118,16 @@ def show_plot(
     plt.xticks(ticks, formatted_ticks, rotation=45)  # Rotate labels 45 degrees
     plt.xlabel("Reference position (bp)")  # Label for x-axis
     plt.ylabel("Reads per million reads")  # Label for y-axis
+
     if filename is not None:
         plt.title(filename.split("/")[-1][:-4])
     create_custom_legend(cols)  # create custom legend
+    plt.show();
     if filename:
         plt.savefig(
             filename, bbox_inches="tight"
-        )  # Adjust bounding box to fit rotated labels
-    plt.show()
+        );  # Adjust bounding box to fit rotated labels
+
 
 
 def create_custom_legend(colors_dict, alpha=0.7):
@@ -190,15 +195,17 @@ def bin_plot(
     all_headers = rps[0].single_ref_profiles.keys()
     headers = [i for i in all_headers if i.startswith(header_prefix)]
     for header in headers:
-        print("\n" + header)
         srps = []
         for i in rps:
             try:
                 srp = i.single_ref_profiles[header]
                 srps.append(srp)
+
             except:
+
                 pass
         if out_prefix is not None:
+
             filename = "{}_{}.png".format(out_prefix, header.split()[0])
             plot_bin_plot(srps, lens, bin_size, filename, y_min, y_max)
         else:

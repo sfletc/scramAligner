@@ -106,25 +106,15 @@ class ScramCSV:
             count_columns = filtered_df.columns[
                 filtered_df.columns.get_loc("Times aligned") + 1 :
             ]
-            filtered_df[count_columns] = filtered_df[count_columns].apply(pd.to_numeric)
+            filtered_df["Mean_Count"] = filtered_df[count_columns].mean(axis=1)
 
-            if min_count is not None and max_count is not None:
-                filtered_df["Mean_Count"] = filtered_df[count_columns].apply(
-                    lambda row: row[(row >= min_count) & (row <= max_count)].mean(),
-                    axis=1,
-                )
-            elif min_count is not None:
-                filtered_df["Mean_Count"] = filtered_df[count_columns].apply(
-                    lambda row: row[row >= min_count].mean(), axis=1
-                )
-            elif max_count is not None:
-                filtered_df["Mean_Count"] = filtered_df[count_columns].apply(
-                    lambda row: row[row <= max_count].mean(), axis=1
-                )
+            if min_count is not None:
+                filtered_df = filtered_df[filtered_df["Mean_Count"] >= min_count]
+            if max_count is not None:
+                filtered_df = filtered_df[filtered_df["Mean_Count"] <= max_count]
 
-            filtered_df = filtered_df.dropna(subset=["Mean_Count"]).drop(
-                columns=["Mean_Count"]
-            )
+        # If you don't need the 'Mean_Count' column in the output, uncomment the following line
+        filtered_df = filtered_df.drop(columns=["Mean_Count"])
 
         # Create a new instance of the class with the filtered DataFrame
         filtered_instance = self.__class__()

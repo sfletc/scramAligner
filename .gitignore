@@ -1,5 +1,5 @@
 # Ignore hidden files and directories
-.*
+
 !/.gitignore
 
 # Ignore cache files and directories

@@ -8,21 +8,23 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
       matrix:
         include:
           - os: linux
             arch: amd64
-            asset_name: myapp-linux-amd64
+            asset_name: scramAligner-linux-amd64
           - os: windows
             arch: amd64
-            asset_name: myapp-windows-amd64
+            asset_name: scramAligner-windows-amd64
           - os: darwin
             arch: amd64
-            asset_name: myapp-macos-intel
+            asset_name: scramAligner-macos-intel
           - os: darwin
             arch: arm64
-            asset_name: myapp-macos-arm
+            asset_name: scramAligner-macos-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@v3

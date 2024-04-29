@@ -10,45 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    strategy:
-      matrix:
-        include:
-          - os: linux
-            arch: amd64
-            asset_name: scramAligner-linux-amd64
-          - os: windows
-            arch: amd64
-            asset_name: scramAligner-windows-amd64
-          - os: darwin
-            arch: amd64
-            asset_name: scramAligner-macos-intel
-          - os: darwin
-            arch: arm64
-            asset_name: scramAligner-macos-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
-      - name: Set up Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: '1.22'
-
-      - name: Build Go app
-        run: |
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o ${{ matrix.asset_name }}
-
-      - name: Package Python scripts
-        run: |
-          mkdir release
-          cp -r scramScripts/scram2Plot release/
-          mv ${{ matrix.asset_name }} release/
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ matrix.asset_name }}
-          path: release
 
       - name: Create release
         if: startsWith(github.ref, 'refs/tags/')
@@ -62,13 +26,53 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Upload release assets
-        if: startsWith(github.ref, 'refs/tags/')
+  build:
+    needs: release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+            arch: amd64
+            asset_name: scramAligner-linux-amd64
+          - os: windows-latest
+            target: windows
+            arch: amd64
+            asset_name: scramAligner-windows-amd64
+          - os: macos-latest
+            target: darwin
+            arch: amd64
+            asset_name: scramAligner-macos-intel
+          - os: macos-latest
+            target: darwin
+            arch: arm64
+            asset_name: scramAligner-macos-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.22'
+
+      - name: Build Go app
+        run: |
+          GOOS=${{ matrix.target }} GOARCH=${{ matrix.arch }} go build -o ${{ matrix.asset_name }}
+
+      - name: Package Python scripts
+        run: |
+          mkdir release
+          cp -r scramScripts/scram2Plot release/
+          mv ${{ matrix.asset_name }} release/
+
+      - name: Upload release asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          upload_url: ${{ needs.release.outputs.upload_url }}
           asset_path: release/${{ matrix.asset_name }}
           asset_name: ${{ matrix.asset_name }}.tar.gz
           asset_content_type: application/gzip

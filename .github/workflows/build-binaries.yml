@@ -66,13 +66,13 @@ jobs:
 
       - name: Package release asset
         run: |
-          mkdir release
-          cp -r scramScripts/scram2Plot release/
-          mv ScramAligner release/
+          mkdir scramAligner
+          cp -r scramScripts/scram2Plot scramAligner/
+          mv ScramAligner scramAligner/
           if [[ "${{ matrix.os }}" == "windows" ]]; then
-            zip -r ScramAligner-${{ matrix.os }}-${{ matrix.arch }}.zip release/
+            zip -r ScramAligner-${{ matrix.os }}-${{ matrix.arch }}.zip scramAligner/
           else
-            tar -czf ScramAligner-${{ matrix.os }}-${{ matrix.arch }}.tar.gz release/
+            tar -czf ScramAligner-${{ matrix.os }}-${{ matrix.arch }}.tar.gz scramAligner/
           fi
 
       - name: Upload Release Asset

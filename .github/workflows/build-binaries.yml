@@ -62,13 +62,13 @@ jobs:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
         run: |
-          go build -o ScramAligner
+          go build -o scramAligner
 
       - name: Package release asset
         run: |
           mkdir scramAligner
           cp -r scramScripts/scram2Plot scramAligner/
-          mv ScramAligner scramAligner/
+          mv scramAligner scramAligner/
           if [[ "${{ matrix.os }}" == "windows" ]]; then
             zip -r ScramAligner-${{ matrix.os }}-${{ matrix.arch }}.zip scramAligner/
           else

@@ -66,6 +66,7 @@ jobs:
 
       - name: Package release asset
         run: |
+          if [ -d scramAligner ]; then rm -rf scramAligner; fi
           mkdir scramAligner
           cp -r scramScripts/scram2Plot scramAligner/
           mv scramAligner scramAligner/

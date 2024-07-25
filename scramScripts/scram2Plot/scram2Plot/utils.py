@@ -202,12 +202,16 @@ class ScramCSV:
 
             
             for index, row in self.df.iterrows():
-                header = row['Header']
-                position = row['Position']
+                try:
+                    header = row['Header']
+                    position = row['Position']
                 
                 # Initialize SectStruct object and get sequences
-                sect_struct = pp.SectStruct(ref_file, header, position-down, position+up)
+                    sect_struct = pp.SectStruct(ref_file, header, position-down, position+up)
                 
                 # Store the calculated min_free_energy in the DataFrame
-                self.df.at[index, 'Min_Free_Energy'] = sect_struct.min_free_energy
+                    self.df.at[index, 'Min_Free_Energy'] = sect_struct.min_free_energy
+                except:
+                    print("error for {} - {}".format(header, position))
+
 

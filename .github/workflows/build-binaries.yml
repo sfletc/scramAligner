@@ -66,9 +66,9 @@ jobs:
 
       - name: Package release asset
         run: |
-          mkdir scramAlignerPkg
-          cp -r scramScripts/scram2Plot scramAlignerPkg/
-          mv scramAligner scramAlignerPkg/
+          mkdir scramAligner
+          cp -r scramScripts/scram2Plot scramAligner/
+          mv scramAligner scramAligner/
           if [[ "${{ matrix.os }}" == "windows" ]]; then
             zip -r ScramAligner-${{ matrix.os }}-${{ matrix.arch }}.zip scramAligner/
           else

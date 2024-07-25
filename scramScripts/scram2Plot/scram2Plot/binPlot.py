@@ -89,7 +89,7 @@ def create_plot(bins, color="gray", alpha=0.7):
 
 
 def show_plot(
-    dataframes, scale_factor=1, filename=None, y_min=None, y_max=None, cols={}
+    dataframes, scale_factor=1, header=None,filename=None, y_min=None, y_max=None, cols={}
 ):
     """
     This function displays the generated plots for a list of dataframes.
@@ -121,8 +121,10 @@ def show_plot(
 
     if filename is not None:
         plt.title(filename.split("/")[-1][:-4])
+    else:
+        plt.title(header)
     create_custom_legend(cols)  # create custom legend
-    plt.show();
+    plt.show()
     if filename:
         plt.savefig(
             filename, bbox_inches="tight"
@@ -144,29 +146,31 @@ def create_custom_legend(colors_dict, alpha=0.7):
     plt.legend(handles=patches, bbox_to_anchor=(1.05, 1), loc="upper left")
 
 
-def plot_bin_plot(srps, lens, bin_size, filename=None, y_min=None, y_max=None):
+def plot_bin_plot(srps, bin_size, header, filename=None, y_min=None, y_max=None):
     """
     This function generates a plot of binned data. It takes in several parameters including a list of single
     reference profile objects, a list of lengths, bin size, and optional parameters for filename and y-axis limits.
     """
     plt.figure(figsize=(10, 6))
     cols = {
-        24: "darkgreen",
-        21: "#984ea3",
-        22: "#3374FF",
-        18: "#e41a1c",
-        19: "#33D4FF",
-        20: "#4daf4a",
-        23: "#ffff33",
-        25: "#a65628",
-        26: "#f781bf",
+            18: "#f781bf",
+            19: "#a65628",
+            20: "#984ea3",
+            21: "red",
+            22: "blue",
+            23: "#999999",
+            24: "darkgreen",
+            25: "brown",
+            26: "#dede00",
+            27: "orange",
+            28: "yellow",
     }
     dfs = []
     pos = 0
     for i in srps:
         dfs.append(create_plot(get_bin_data(i, bin_size), cols[i.srna_len]))
         pos += 1
-    show_plot(dfs, bin_size, filename, y_min, y_max, cols)
+    show_plot(dfs, bin_size, header, filename, y_min, y_max, cols)
 
 
 def load_ref_profiles(file_prefix, lens):
@@ -200,16 +204,15 @@ def bin_plot(
             try:
                 srp = i.single_ref_profiles[header]
                 srps.append(srp)
-
             except:
 
                 pass
         if out_prefix is not None:
 
             filename = "{}_{}.png".format(out_prefix, header.split()[0])
-            plot_bin_plot(srps, lens, bin_size, filename, y_min, y_max)
+            plot_bin_plot(srps, bin_size, header, filename, y_min, y_max)
         else:
-            plot_bin_plot(srps, lens, bin_size, None, y_min, y_max)
+            plot_bin_plot(srps, bin_size, header, None, y_min, y_max)
 
 
 def comma_separated_values(value):

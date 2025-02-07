@@ -981,7 +981,7 @@ def main():
     parser.add_argument("-a", "--abundance", help="Plot abundance", action="store_true")
     parser.add_argument("-e", "--error", help="Plot error", action="store_true")
     parser.add_argument(
-        "-y", "--ylim", help="Set y-axis limit", type=int, nargs=2, default=0
+        "-y", "--ylim", help="Set y-axis limit", type=int, default=0
     )
     parser.add_argument("-n", "--no_save", help="Do not save plot", action="store_true")
     parser.add_argument(

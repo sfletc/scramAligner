@@ -412,13 +412,14 @@ class DataForPlot(object):
     - y_flat: Flattened list of y-axis values for plotting.
     """
 
-    def __init__(self, ref_profiles, header):
+    def __init__(self, ref_profiles, header, abund=False):
         """
         Initialize a new DataForPlot object.
 
         Args:
         - ref_profiles: A reference profiles object containing sequence data.
         - header: Header string to specify which sequence to use.
+        - abund: Whether to extract data using abundance (max) or coverage (sum) logic.
         """
         self.ref_profiles = ref_profiles
         self.header = header
@@ -429,15 +430,23 @@ class DataForPlot(object):
         self.rvs = np.zeros((self.ref_len + 1, self.replicates), dtype=float)
         self.x_axis = list(range(len(self.fwd)))
         self.y_flat = []
-        self._extract_from_ref_profiles()
+        self._extract_from_ref_profiles(abund)
 
-    def _extract_from_ref_profiles(self):
+    def _extract_from_ref_profiles(self, abund):
         """Extracts alignment data for a specific sequence from the reference profiles object."""
         for sa in self.ref_profiles.single_ref_profiles[self.header].all_alignments:
             if sa.strand == "+":
-                self.fwd[sa.position] = sa.indv_alignments
+                if abund:
+                    if sa.mean_alignments() > np.mean(self.fwd[sa.position]):
+                        self.fwd[sa.position] = sa.indv_alignments
+                else:
+                    self.fwd[sa.position] += sa.indv_alignments
             else:
-                self.rvs[sa.position] = sa.indv_alignments
+                if abund:
+                    if sa.mean_alignments() > np.mean(self.rvs[sa.position]):
+                        self.rvs[sa.position] = sa.indv_alignments
+                else:
+                    self.rvs[sa.position] += sa.indv_alignments
 
     def convert_to_coverage(self, abund=True):
         """Converts raw alignment data to coverage data."""
@@ -456,14 +465,25 @@ class DataForPlot(object):
         - new_arr: A new array containing coverage data.
         """
         new_arr = np.zeros((old_array.shape), dtype=float)
-        for i in range(len(new_arr) - self.srna_len + 1):
-            for j in range(len(new_arr[i])):
-                if not abund:
+        
+        if abund:
+            means = np.mean(old_array, axis=1)
+            current_max_means = np.zeros(len(new_arr))
+
+            for i in range(len(new_arr) - self.srna_len + 1):
+                if means[i] == 0:
+                    continue
+                
+                src_mean = means[i]
+                for k in range(self.srna_len):
+                    if src_mean > current_max_means[i + k]:
+                        new_arr[i + k] = old_array[i]
+                        current_max_means[i + k] = src_mean
+        else:
+            for i in range(len(new_arr) - self.srna_len + 1):
+                for j in range(len(new_arr[i])):
                     new_arr[i : i + self.srna_len, j] += old_array[i, j]
-                else:
-                    for k in range(self.srna_len):
-                        if old_array[i, j] > new_arr[i + k, j]:
-                            new_arr[i + k, j] = old_array[i, j]
+                    
         return new_arr
 
     def convert_to_error_bounds(self):
@@ -745,7 +765,7 @@ class AlignmentPlot:
             h (str): The header of the sequence.
             get_max (bool): Whether to only get the maximum y-axis value.
         """
-        spd = DataForPlot(rp, h)
+        spd = DataForPlot(rp, h, abund=self.abund)
         self._parse_alignments(spd, h, get_max)
 
     def _parse_alignments(self, spd, h, get_max):

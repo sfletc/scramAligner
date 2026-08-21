@@ -5,70 +5,79 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-# from scram2Plot.profilePlot import RefProfiles
-from profilePlot import RefProfiles
+
+try:
+    from .profilePlot import RefProfiles, color_for_length
+except ImportError:  # allow running as a plain script: python binPlot.py
+    from profilePlot import RefProfiles, color_for_length
+
 
 def get_bin_data(srp, bin_size):
     """
     This function gets the bin data by taking in two arguments: a single reference profile object srp and a bin_size.
     It generates a bin number based on the length of the reference divided by the bin size.
     It then assigns each alignment to its respective bin based on its position and strand.
-    The function returns the populated bins.
+    The function returns the populated bins as a (bin_no, 2, replicates) array
+    (axis 1 is forward/reverse strand).
     """
     bin_no = math.ceil(srp.ref_len / bin_size)
-
-    # bins is a lists of lists of len bin no., with a f and r list in each list
-    bins = np.array(
-        [[[0.0] * srp.replicates, [0.0] * srp.replicates] for _ in range(bin_no)]
-    )
-    for i in srp.all_alignments:
-        bin_count = int(i.position / bin_size)
-        if i.strand == "+":
-            bins[bin_count][0] += i.indv_alignments
-        else:
-            bins[bin_count][1] += i.indv_alignments
+    bins = np.zeros((bin_no, 2, srp.replicates))
+    if srp.positions is None or len(srp.positions) == 0:
+        return bins
+    # positions are 1-based, so the bin index uses position - 1
+    bin_idx = (srp.positions - 1) // bin_size
+    strand_idx = np.where(srp.strands, 0, 1)
+    np.add.at(bins, (bin_idx, strand_idx), srp.counts)
     return bins
 
 
 def calculate_means_and_ses(bins):
     """
-    This function takes in a list of bins and calculates the mean and standard errors
-    across all replicates within each bin. The function returns a tuple containing the
-    means and standard errors.
+    This function takes in the binned counts and calculates the mean and standard error
+    across all replicates within each bin. The standard error uses the sample standard
+    deviation (ddof=1); with a single replicate the standard error is zero.
+    The function returns a tuple containing the means and standard errors.
     """
     means = np.mean(bins, axis=2)
-    ses = np.std(bins, axis=2) / np.sqrt(bins.shape[2])
+    replicates = bins.shape[2]
+    if replicates > 1:
+        ses = np.std(bins, axis=2, ddof=1) / np.sqrt(replicates)
+    else:
+        ses = np.zeros_like(means)
     return means, ses
 
 
 def create_dataframe(bins, means, ses):
     """
     This function takes in bins, means, and standard errors, and creates a pandas DataFrame with
-    columns for the bin number, list (either 'first' or 'second'), mean, and standard error.
-    The DataFrame is then returned.
+    columns for the bin number, list (either 'first' for the forward strand or 'second' for the
+    reverse strand, whose means are negated), mean, and standard error. The DataFrame is then returned.
     """
-    data = []
-    for i in range(bins.shape[0]):
-        data.append([i, "first", means[i, 0], ses[i, 0]])
-        data.append([i, "second", -means[i, 1], ses[i, 1]])
-    df = pd.DataFrame(data, columns=["bin", "list", "mean", "se"])
+    bin_no = bins.shape[0]
+    df = pd.DataFrame(
+        {
+            "bin": np.tile(np.arange(bin_no), 2),
+            "list": np.repeat(["first", "second"], bin_no),
+            "mean": np.concatenate((means[:, 0], -means[:, 1])),
+            "se": np.concatenate((ses[:, 0], ses[:, 1])),
+        }
+    )
     return df
 
 
 def plot_standard_errors(df, color="gray", alpha=0.3):
     """
-    This function plots the standard error region for two lists in a DataFrame (df) with a given color and alpha.
+    This function plots the mean line and standard error region for both strands in a
+    DataFrame (df) with a given color and alpha.
     It returns the DataFrame
     """
     for list_name in ["first", "second"]:
+        sub = df[df["list"] == list_name]
+        plt.plot(sub["bin"], sub["mean"], color=color, alpha=min(1.0, alpha * 2), linewidth=0.8)
         plt.fill_between(
-            df[df["list"] == list_name]["bin"],
-            (
-                df[df["list"] == list_name]["mean"] - df[df["list"] == list_name]["se"]
-            ).values,
-            (
-                df[df["list"] == list_name]["mean"] + df[df["list"] == list_name]["se"]
-            ).values,
+            sub["bin"],
+            (sub["mean"] - sub["se"]).values,
+            (sub["mean"] + sub["se"]).values,
             color=color,
             alpha=alpha,
         )
@@ -79,7 +88,7 @@ def create_plot(bins, color="gray", alpha=0.7):
     """
     This function generates a plot for the given bin data.
     It first calculates the means and standard errors, and then creates a DataFrame.
-    It then plots the standard error region for the DataFrame.
+    It then plots the mean and standard error region for the DataFrame.
     The DataFrame is returned.
     """
     means, ses = calculate_means_and_ses(bins)
@@ -89,10 +98,10 @@ def create_plot(bins, color="gray", alpha=0.7):
 
 
 def show_plot(
-    dataframes, scale_factor=1, header=None,filename=None, y_min=None, y_max=None, cols={}
+    dataframes, scale_factor=1, header=None, filename=None, y_min=None, y_max=None, cols=None
 ):
     """
-    This function displays the generated plots for a list of dataframes.
+    This function finalizes and displays the generated plots for a list of dataframes.
     It takes in several parameters including a list of dataframes, a scale factor for the x-axis, a filename (optional),
     minimum and maximum y-axis values (optional), and a dictionary of colors for the legend (optional).
     """
@@ -100,8 +109,16 @@ def show_plot(
     plt.axhline(0, color="black")
 
     if y_min is None or y_max is None:  # If y-axis limits are not provided
+        # reverse-strand means are negative, so take the largest magnitude of
+        # both error bounds on both strands
         y_abs_max = (
-            max(max(df["mean"] + df["se"]) for df in dataframes) * 1.1
+            max(
+                np.abs(
+                    np.concatenate(((df["mean"] + df["se"]), (df["mean"] - df["se"])))
+                ).max()
+                for df in dataframes
+            )
+            * 1.1
         )  # Increased limits by 10%
         if y_min is None:
             y_min = -y_abs_max
@@ -123,13 +140,11 @@ def show_plot(
         plt.title(filename.split("/")[-1][:-4])
     else:
         plt.title(header)
-    create_custom_legend(cols)  # create custom legend
-    plt.show()
+    create_custom_legend(cols or {})  # create custom legend
     if filename:
-        plt.savefig(
-            filename, bbox_inches="tight"
-        );  # Adjust bounding box to fit rotated labels
-
+        # save before show: interactive backends destroy the figure on show
+        plt.savefig(filename, bbox_inches="tight")  # Adjust bounding box to fit rotated labels
+    plt.show()
 
 
 def create_custom_legend(colors_dict, alpha=0.7):
@@ -151,26 +166,16 @@ def plot_bin_plot(srps, bin_size, header, filename=None, y_min=None, y_max=None)
     This function generates a plot of binned data. It takes in several parameters including a list of single
     reference profile objects, a list of lengths, bin size, and optional parameters for filename and y-axis limits.
     """
-    plt.figure(figsize=(10, 6))
-    cols = {
-            18: "#f781bf",
-            19: "#a65628",
-            20: "#984ea3",
-            21: "red",
-            22: "blue",
-            23: "#999999",
-            24: "darkgreen",
-            25: "brown",
-            26: "#dede00",
-            27: "orange",
-            28: "yellow",
-    }
-    dfs = []
-    pos = 0
-    for i in srps:
-        dfs.append(create_plot(get_bin_data(i, bin_size), cols[i.srna_len]))
-        pos += 1
-    show_plot(dfs, bin_size, header, filename, y_min, y_max, cols)
+    fig = plt.figure(figsize=(10, 6))
+    try:
+        # legend only the lengths actually plotted
+        cols = {srp.srna_len: color_for_length(srp.srna_len) for srp in srps}
+        dfs = []
+        for srp in srps:
+            dfs.append(create_plot(get_bin_data(srp, bin_size), cols[srp.srna_len]))
+        show_plot(dfs, bin_size, header, filename, y_min, y_max, cols)
+    finally:
+        plt.close(fig)
 
 
 def load_ref_profiles(file_prefix, lens):
@@ -198,17 +203,16 @@ def bin_plot(
     rps = load_ref_profiles(file_prefix, lens)
     all_headers = rps[0].single_ref_profiles.keys()
     headers = [i for i in all_headers if i.startswith(header_prefix)]
+    if not headers:
+        raise ValueError(
+            f"No reference headers starting with '{header_prefix}' found in "
+            f"{file_prefix}_{lens[0]}.csv"
+        )
     for header in headers:
-        srps = []
-        for i in rps:
-            try:
-                srp = i.single_ref_profiles[header]
-                srps.append(srp)
-            except:
-
-                pass
+        srps = [
+            i.single_ref_profiles[header] for i in rps if header in i.single_ref_profiles
+        ]
         if out_prefix is not None:
-
             filename = "{}_{}.png".format(out_prefix, header.split()[0])
             plot_bin_plot(srps, bin_size, header, filename, y_min, y_max)
         else:
@@ -247,15 +251,19 @@ def main():
 
     args = parser.parse_args(sys.argv[1:])
 
-    bin_plot(
-        args.align_prefix,
-        args.align_lens,
-        args.header_prefix,
-        args.bin_size,
-        args.out_prefix,
-        args.y_min,
-        args.y_max,
-    )
+    try:
+        bin_plot(
+            args.align_prefix,
+            args.align_lens,
+            args.header_prefix,
+            args.bin_size,
+            args.out_prefix,
+            args.y_min,
+            args.y_max,
+        )
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -1,10 +1,35 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import os.path
-import csv
 import argparse
-from Bio import SeqIO
-from ViennaRNA import RNA
+import sys
+
+# Shared color scheme for sRNA lengths; lengths outside the map get a fallback
+# colormap color instead of raising KeyError.
+SRNA_LEN_COLS = {
+    18: "#f781bf",
+    19: "#a65628",
+    20: "#984ea3",
+    21: "red",
+    22: "blue",
+    23: "#999999",
+    24: "darkgreen",
+    25: "brown",
+    26: "#dede00",
+    27: "orange",
+    28: "yellow",
+}
+
+
+def color_for_length(srna_len):
+    """Returns the plot color for an sRNA length, falling back to a colormap
+    color for lengths outside the standard 18-28 nt range."""
+    try:
+        return SRNA_LEN_COLS[int(srna_len)]
+    except (KeyError, ValueError):
+        cmap = plt.get_cmap("tab10")
+        return cmap(hash(str(srna_len)) % 10)
 
 
 class DNA(object):
@@ -160,7 +185,63 @@ class SingleRefProfile(object):
         self.ref_len = 0
         self.replicates = 0
         self.srna_len = 0
-        self.all_alignments = []
+        # Columnar storage - one entry per alignment. SingleAlignment objects are
+        # only materialized on demand (all_alignments property), so parsing a
+        # chromosome-scale CSV does not allocate millions of small objects.
+        self.srnas = []
+        self.positions = None  # int64 array
+        self.strands = None  # bool array, True for "+"
+        self.times = None  # int64 array
+        self.counts = None  # (n, replicates) float array
+        self._alignments_cache = None
+        self._alignments_override = None
+
+    @property
+    def all_alignments(self):
+        if self._alignments_override is not None:
+            return self._alignments_override
+        if self.positions is None:
+            return []
+        if self._alignments_cache is None:
+            self._alignments_cache = [
+                SingleAlignment(DNA(s), int(p), "+" if f else "-", int(t), c)
+                for s, p, f, t, c in zip(
+                    self.srnas, self.positions, self.strands, self.times, self.counts
+                )
+            ]
+        return self._alignments_cache
+
+    @all_alignments.setter
+    def all_alignments(self, alignments):
+        try:
+            self._set_columns_from(alignments)
+            self._alignments_override = None
+        except (AttributeError, TypeError):
+            # not SingleAlignment-like objects; keep the raw list (used by tests)
+            self._alignments_override = list(alignments)
+
+    def _set_columns_from(self, alignments):
+        alignments = list(alignments)
+        if not alignments:
+            self.srnas = []
+            self.positions = None
+            self.strands = None
+            self.times = None
+            self.counts = None
+            self._alignments_cache = None
+            return
+        positions = np.array([sa.position for sa in alignments], dtype=np.int64)
+        strands = np.array([sa.strand == "+" for sa in alignments])
+        times = np.array([sa.times_aligned for sa in alignments], dtype=np.int64)
+        counts = np.stack(
+            [np.asarray(sa.indv_alignments, dtype=float) for sa in alignments]
+        )
+        self.srnas = [str(sa.srna) for sa in alignments]
+        self.positions = positions
+        self.strands = strands
+        self.times = times
+        self.counts = counts
+        self._alignments_cache = alignments
 
     def __str__(self):
         return "{0}\t{1}".format(self.ref_len, self.all_alignments)
@@ -173,7 +254,7 @@ class SingleRefProfile(object):
             self.ref_len == other.ref_len
             and self.all_alignments == other.all_alignments
             and self.replicates == other.replicates
-            and self.snra_len == other.srna_len
+            and self.srna_len == other.srna_len
         )
 
 
@@ -205,6 +286,7 @@ class RefProfiles(object):
         self.srna_len = 0
         self.replicates = 0
         self.single_ref_profiles = {}
+        self.subset = False
 
     def __str__(self):
         return "{0}\t{1}\t{2}".format(
@@ -230,72 +312,83 @@ class RefProfiles(object):
             end (int): end position of the range
             padding (int): number of base pairs to include on either end of the range
         """
-        try:
-            with open(in_file, "r") as in_handle:
-                reader = csv.reader(in_handle, delimiter=",")
-                for row in reader:
-                    if row[0] == "Header":
-                        continue
-                    (
-                        row_header,
-                        ref_len,
-                        srna,
-                        position,
-                        strand,
-                        times_aligned,
-                        *indv_alignments,
-                    ) = row
-                    row_header = row_header.split()[0]
-                    # Skip alignments that do not match the input header or are outside the input positions
-                    if header is not None and row_header != header:
-                        continue
-                    if (
-                        start is not None
-                        and end is not None
-                        and (
-                            int(position) < start - padding
-                            or int(position) > end + padding
-                        )
-                    ):
-                        continue
+        subset = start is not None and end is not None
+        self.subset = subset
 
-                    # Construct a SingleAlignment object
+        df = pd.read_csv(in_file)
+        columns = [str(c) for c in df.columns]
+        if "Std. Err" in columns:
+            raise ValueError(
+                f"{in_file} is in the aligner's mean/standard-error format; "
+                "scram2Plot requires the per-replicate format "
+                "(Header,len,sRNA,Position,Strand,Times aligned,<file columns>)"
+            )
+        if len(columns) < 7 or columns[0] != "Header":
+            raise ValueError(
+                f"{in_file} is not a scram profile CSV; expected columns "
+                "Header,len,sRNA,Position,Strand,Times aligned,<file columns>"
+            )
+        replicates = len(columns) - 6
 
-                    srna = DNA(srna)
-                    times_aligned = int(times_aligned)
-                    ref_len = int(ref_len)
-                    position = int(position)
-                    if start is not None:
-                        position = (
-                            position - start + padding
-                        )  # New position relative to the start of the subset
-                        ref_len = end - start + 2 * padding  # New reference length
-                    indv_alignments = np.array([float(x) for x in indv_alignments])
-                    sa = SingleAlignment(
-                        srna, position, strand, times_aligned, indv_alignments
-                    )
+        headers = df.iloc[:, 0].astype(str).str.split().str[0].to_numpy()
+        ref_lens = df.iloc[:, 1].to_numpy(dtype=np.int64)
+        srnas = df.iloc[:, 2].astype(str).to_numpy()
+        positions = df.iloc[:, 3].to_numpy(dtype=np.int64)
+        strands = df.iloc[:, 4].to_numpy() == "+"
+        times = df.iloc[:, 5].to_numpy(dtype=np.int64)
+        counts = df.iloc[:, 6:].to_numpy(dtype=float)
+        if np.isnan(counts).any():
+            raise ValueError(
+                f"{in_file} has missing or non-numeric read-count values"
+            )
 
-                    # Add the SingleAlignment to the corresponding SingleRefProfile
-                    if row_header not in self.single_ref_profiles:
-                        self.single_ref_profiles[row_header] = SingleRefProfile()
-                        self.single_ref_profiles[row_header].ref_len = ref_len
-                        self.single_ref_profiles[row_header].replicates = len(
-                            indv_alignments
-                        )
-                        self.single_ref_profiles[row_header].srna_len = len(srna)
-                        self.srna_len = len(srna)
-                    self.single_ref_profiles[row_header].all_alignments.append(sa)
+        # Keep only rows for the requested header and window. A read overlapping
+        # the left edge of the window still covers window positions, so the left
+        # cut-off is widened by each read's length; DataForPlot clips the
+        # overhang after coverage conversion.
+        keep = np.ones(len(df), dtype=bool)
+        if header is not None:
+            keep &= headers == header
+        if subset:
+            srna_lens = df.iloc[:, 2].astype(str).str.len().to_numpy(dtype=np.int64)
+            keep &= positions + srna_lens - 1 >= start - padding
+            keep &= positions <= end + padding
+        if not keep.all():
+            headers = headers[keep]
+            ref_lens = ref_lens[keep]
+            srnas = srnas[keep]
+            positions = positions[keep]
+            strands = strands[keep]
+            times = times[keep]
+            counts = counts[keep]
+        if subset:
+            # positions become relative to the subset start (possibly negative
+            # for reads overlapping the left edge)
+            positions = positions - start + padding
 
-                # Set the number of replicates based on the last read alignment
+        if len(headers) == 0:
+            raise ValueError(
+                f"{in_file} contains no alignments"
+                + (f" for header {header}" if header is not None else "")
+            )
 
-                if "sa" in locals():
-                    self.replicates = len(sa.indv_alignments)
-                else:
-                    raise ValueError("The input file does not contain any alignments")
-        except FileNotFoundError:
-            print(f"The input file {in_file} does not exist. Skipping.")
-        except Exception as e:
-            print(f"An error occurred while processing the input file {in_file}: {e}")
+        group_codes, unique_headers = pd.factorize(headers)
+        for code, row_header in enumerate(unique_headers):
+            mask = group_codes == code
+            profile = SingleRefProfile()
+            profile.ref_len = (
+                end - start + 2 * padding if subset else int(ref_lens[mask][0])
+            )
+            profile.replicates = replicates
+            profile.srnas = srnas[mask].tolist()
+            profile.positions = positions[mask]
+            profile.strands = strands[mask]
+            profile.times = times[mask]
+            profile.counts = counts[mask]
+            profile.srna_len = len(profile.srnas[0])
+            self.single_ref_profiles[row_header] = profile
+        self.srna_len = self.single_ref_profiles[unique_headers[0]].srna_len
+        self.replicates = replicates
 
 
 class SectStruct(object):
@@ -347,6 +440,8 @@ class SectStruct(object):
         - FileNotFoundError if the reference file is not found.
         - ValueError if the sequence is not found in the file or if start/end positions are invalid.
         """
+        from Bio import SeqIO  # deferred: only needed for secondary-structure plots
+
         # Check if the reference file exists
         if not os.path.isfile(self.ref_file):
             raise FileNotFoundError(f"Reference file {self.ref_file} not found.")
@@ -380,6 +475,8 @@ class SectStruct(object):
         """
         Computes the secondary structure and minimum free energy of the stored sequence using RNA.fold and stores it.
         """
+        from ViennaRNA import RNA  # deferred: only needed for secondary-structure plots
+
         self.structure, self.min_free_energy = RNA.fold(self.sequence)
 
     def _get_pairs(self):
@@ -421,70 +518,91 @@ class DataForPlot(object):
         - header: Header string to specify which sequence to use.
         - abund: Whether to extract data using abundance (max) or coverage (sum) logic.
         """
-        self.ref_profiles = ref_profiles
         self.header = header
-        self.ref_len = ref_profiles.single_ref_profiles[header].ref_len
+        profile = ref_profiles.single_ref_profiles[header]
+        self.ref_len = profile.ref_len
         self.srna_len = ref_profiles.srna_len
         self.replicates = ref_profiles.replicates
-        self.fwd = np.zeros((self.ref_len + 1, self.replicates), dtype=float)
-        self.rvs = np.zeros((self.ref_len + 1, self.replicates), dtype=float)
-        self.x_axis = list(range(len(self.fwd)))
+        # For subset windows, reads overlapping the left edge have negative
+        # relative positions; extra leading rows hold them until coverage has
+        # been smeared, then trim_margin() removes the overhang.
+        self.margin = self.srna_len - 1 if ref_profiles.subset else 0
+        rows = self.margin + self.ref_len + 1
+        self.fwd = np.zeros((rows, self.replicates), dtype=float)
+        self.rvs = np.zeros((rows, self.replicates), dtype=float)
+        self.x_axis = np.arange(self.ref_len + 1)
         self.y_flat = []
-        self._extract_from_ref_profiles(abund)
+        self._extract_from_ref_profiles(profile, abund)
 
-    def _extract_from_ref_profiles(self, abund):
-        """Extracts alignment data for a specific sequence from the reference profiles object."""
-        for sa in self.ref_profiles.single_ref_profiles[self.header].all_alignments:
-            if sa.strand == "+":
-                if abund:
-                    if sa.mean_alignments() > np.mean(self.fwd[sa.position]):
-                        self.fwd[sa.position] = sa.indv_alignments
-                else:
-                    self.fwd[sa.position] += sa.indv_alignments
+    def _extract_from_ref_profiles(self, profile, abund):
+        """Extracts alignment data for a specific sequence from the profile's columns."""
+        if profile.positions is None or len(profile.positions) == 0:
+            return
+        positions = profile.positions + self.margin
+        counts = profile.counts
+        for arr, mask in ((self.fwd, profile.strands), (self.rvs, ~profile.strands)):
+            p = positions[mask]
+            c = counts[mask]
+            if abund:
+                # highest-mean read wins each position: assign in ascending mean
+                # order so the max lands last
+                order = np.argsort(c.mean(axis=1), kind="stable")
+                arr[p[order]] = c[order]
             else:
-                if abund:
-                    if sa.mean_alignments() > np.mean(self.rvs[sa.position]):
-                        self.rvs[sa.position] = sa.indv_alignments
-                else:
-                    self.rvs[sa.position] += sa.indv_alignments
+                np.add.at(arr, p, c)
+
+    def trim_margin(self):
+        """Removes the left-overhang rows used for reads spanning the left edge of a
+        subset window (a no-op for whole-reference data)."""
+        if self.margin:
+            self.fwd = self.fwd[self.margin :]
+            self.rvs = self.rvs[self.margin :]
+            self.margin = 0
 
     def convert_to_coverage(self, abund=True):
         """Converts raw alignment data to coverage data."""
         self.fwd = self._coverage_per_strand(self.fwd, abund)
         self.rvs = self._coverage_per_strand(self.rvs, abund)
+        self.trim_margin()
 
     def _coverage_per_strand(self, old_array, abund):
         """
-        Convert to coverage per strand.
+        Convert to coverage per strand: each read's counts are spread across the
+        srna_len positions its alignment covers.
 
         Args:
-        - old_array: Existing array of alignment data.
-        - abund: If True, abundance-based calculation will be performed.
+        - old_array: Existing array of alignment data (reads at their 5'-most position).
+        - abund: If True, each position shows the counts of the highest-mean read
+          covering it (winner takes all); otherwise counts of overlapping reads sum.
 
         Returns:
         - new_arr: A new array containing coverage data.
         """
-        new_arr = np.zeros((old_array.shape), dtype=float)
-        
-        if abund:
-            means = np.mean(old_array, axis=1)
-            current_max_means = np.zeros(len(new_arr))
+        n, reps = old_array.shape
+        window_starts = n - self.srna_len + 1  # valid alignment start rows
+        if window_starts <= 0:
+            return np.zeros_like(old_array)
 
-            for i in range(len(new_arr) - self.srna_len + 1):
-                if means[i] == 0:
-                    continue
-                
-                src_mean = means[i]
-                for k in range(self.srna_len):
-                    if src_mean > current_max_means[i + k]:
-                        new_arr[i + k] = old_array[i]
-                        current_max_means[i + k] = src_mean
-        else:
-            for i in range(len(new_arr) - self.srna_len + 1):
-                for j in range(len(new_arr[i])):
-                    new_arr[i : i + self.srna_len, j] += old_array[i, j]
-                    
-        return new_arr
+        if abund:
+            means = old_array[:window_starts].mean(axis=1)
+            pad = np.full(self.srna_len - 1, -np.inf)
+            padded = np.concatenate((pad, means, pad))
+            # windows[j] holds the means of every read window covering position j
+            windows = np.lib.stride_tricks.sliding_window_view(padded, self.srna_len)[:n]
+            best = windows.max(axis=1)
+            # np.argmax takes the first max, matching the original first-window-wins
+            # tie handling
+            src = windows.argmax(axis=1) + np.arange(n) - (self.srna_len - 1)
+            return np.where(
+                (best > 0)[:, None],
+                old_array[np.clip(src, 0, window_starts - 1)],
+                0.0,
+            )
+
+        diff = np.zeros((n + self.srna_len, reps), dtype=old_array.dtype)
+        diff[:window_starts] = old_array[:window_starts]
+        diff[self.srna_len : window_starts + self.srna_len] -= old_array[:window_starts]
+        return np.cumsum(diff, axis=0)[:n]
 
     def convert_to_error_bounds(self):
         """Calculates and stores error bounds for the data."""
@@ -493,67 +611,68 @@ class DataForPlot(object):
 
     def _error_bounds(self, old_array):
         """
-        Calculate error bounds for an array.
+        Calculate mean +/- standard error bounds for an array.
+
+        Uses the sample standard deviation (ddof=1), as required for the standard
+        error of a mean across replicates. With a single replicate the error is 0.
 
         Args:
         - old_array: Existing array of data.
 
         Returns:
-        - new_arr: A new array containing lower and upper error bounds.
+        - new_arr: A (rows, 2) array containing lower and upper error bounds.
         """
-        new_arr = np.zeros((self.ref_len + 1, 2), dtype=float)
-        for i in range(len(new_arr)):
-            new_arr[i, 0] = np.mean(old_array[i, :]) - (
-                np.std(old_array[i, :]) / np.sqrt(self.replicates)
-            )
-            new_arr[i, 1] = np.mean(old_array[i, :]) + (
-                np.std(old_array[i, :]) / np.sqrt(self.replicates)
-            )
-        return new_arr
+        mean = old_array.mean(axis=1)
+        reps = old_array.shape[1]
+        if reps > 1:
+            se = old_array.std(axis=1, ddof=1) / np.sqrt(reps)
+        else:
+            se = np.zeros_like(mean)
+        return np.column_stack((mean - se, mean + se))
 
     def flatten(self, d=1):
         """
-        Flattens data arrays for both strands and appends them to self.y_flat.
+        Flattens data arrays for both strands into self.y_flat: all forward-strand
+        columns first, then all (negated) reverse-strand columns, so y_flat[i] and
+        y_flat[i + n_columns] are the same column's two strands. Replaces any
+        previous contents of y_flat.
 
         Args:
-        - d: Degree of smoothing. Default is 1.
+        - d: Degree of smoothing. Default is 1 (no smoothing).
         """
-        if d == 1:
-            for i in range(self.fwd.shape[1]):
-                self.y_flat.append(self.fwd[:, [i]].flatten())
-                self.y_flat.append(-self.rvs[:, [i]].flatten())
-        else:
-            for i in range(self.fwd.shape[1]):
-                self.y_flat.append(self._smoothTriangle(self.fwd[:, [i]].flatten(), d))
-                self.y_flat.append(self._smoothTriangle(-self.rvs[:, [i]].flatten(), d))
+        self.y_flat = []
+        for i in range(self.fwd.shape[1]):
+            self.y_flat.append(self._maybe_smooth(self.fwd[:, i], d))
+        for i in range(self.rvs.shape[1]):
+            self.y_flat.append(self._maybe_smooth(-self.rvs[:, i], d))
+
+    @classmethod
+    def _maybe_smooth(cls, column, d):
+        return cls._smoothTriangle(column, d) if d > 1 else column
 
     @staticmethod
     def _smoothTriangle(data, degree):
         """
-        Smooths data using a triangular smoothing function.
+        Smooths data using a centred triangular window; partial windows at the
+        edges are renormalized rather than padded with repeated values.
 
         Args:
         - data: List or array of data points.
         - degree: Degree of smoothing.
 
         Returns:
-        - smoothed: Smoothed data.
+        - smoothed: Smoothed data as a numpy array.
         """
-        triangle = np.concatenate(
+        data = np.asarray(data, dtype=float)
+        if degree < 1 or len(data) == 0:
+            return data
+        kernel = np.concatenate(
             (np.arange(degree + 1), np.arange(degree)[::-1])
-        )  # up then down
-        smoothed = []
-
-        for i in range(degree, len(data) - degree * 2):
-            point = data[i : i + len(triangle)] * triangle
-            smoothed.append(np.sum(point) / np.sum(triangle))
-        # Handle boundaries
-        smoothed = [smoothed[0]] * int(
-            degree + degree / 2
-        ) + smoothed  # TODO: this can be better
-        while len(smoothed) < len(data):
-            smoothed.append(smoothed[-1])
-        return smoothed
+        ).astype(float)  # up then down, centred, length 2*degree+1
+        kernel /= kernel.sum()
+        smoothed = np.convolve(data, kernel, mode="same")
+        edge_weight = np.convolve(np.ones_like(data), kernel, mode="same")
+        return smoothed / edge_weight
 
     def __str__(self):
         return "{0}\t{1}\t{2}\t{3}\t{4}".format(
@@ -635,20 +754,15 @@ class AlignmentPlot:
 
     def set_up_plot(self):
         """
-        Sets up a matplotlib plot for displaying biological sequence data.
+        Sets up the current matplotlib figure for displaying biological sequence data.
         """
-        # Create a new figure with specified size and DPI
-        plt.figure(figsize=(12, 12), dpi=600)
-
         # Set the x-axis label
         plt.xlabel("Position")
 
-        # Make the x and y dimensions equal; TODO: Check if this is needed
-        plt.axis("equal")
-
         # If a secondary structure object is provided, perform additional setup
+        # (sec_struct_setup applies its own equal aspect so the arcs stay circular)
         if self.ss is not None:
-            self.sec_struct_setup()  # Note: `sec_struct_setup` needs to be defined as another method in this class
+            self.sec_struct_setup()
 
         # Hide y-axis ticks
         plt.gca().set_yticks([])
@@ -708,105 +822,80 @@ class AlignmentPlot:
                 print("Selected sequence:")
                 print(self.ss.sequence)
 
-        self.set_up_plot()
+        prepared = self._prepare_data()
+        if not prepared:
+            raise RuntimeError(
+                f"No alignments found for header {self.header} at lengths "
+                f"{self.align_lens} with prefix {self.align_prefix}"
+            )
 
-        if self.ylim_set == 0:
-            self.ylim_set = self.get_y_max()
+        fig = plt.figure(figsize=(12, 12))
+        try:
+            self.set_up_plot()
+            if self.ylim_set == 0:
+                self.ylim_set = self._max_abundance(prepared) * 1.1
+            for spd in prepared.values():
+                self.single_plot(spd, self.header)
+            if self.all_handles:
+                plt.legend(self.all_handles, self.all_labels, loc="upper right")
+            if self.save:
+                self.save_plot()
+            plt.show()
+        finally:
+            plt.close(fig)
 
-        for len in self.align_lens:
-            self.process_single_alignment(len)
-
-        if self.se:
-            plt.legend(self.all_handles, self.all_labels, loc="upper right")
-
-        if self.save:
-            self.save_plot()
-
-        plt.show()
-
-    def get_y_max(self):
+    def _prepare_data(self):
         """
-        Get the maximum value for the y-axis based on the data.
+        Loads and transforms the alignment data exactly once per sRNA length.
 
         Returns:
-            float: The maximum y-axis value multiplied by 1.1 for padding.
+            dict: {srna_len: DataForPlot} for every length with alignments.
         """
-        for len in self.align_lens:
-            self.process_single_alignment(len, get_max=True)
-        return self.ylim_set * 1.1
-
-    def process_single_alignment(self, srna_len, get_max=False):
-        """
-        Processes a single alignment file.
-
-        Args:
-            len (int): The length of the alignment.
-            get_max (bool, optional): Whether to only get the maximum y-axis value. Defaults to False.
-        """
-        try:
+        prepared = {}
+        for srna_len in self.align_lens:
             file_path = f"{self.align_prefix}_{srna_len}.csv"
-            if os.path.isfile(file_path):
-                rp = RefProfiles()
+            if not os.path.isfile(file_path):
+                print(f"File {file_path} not found. Skipping.")
+                continue
+            rp = RefProfiles()
+            try:
                 rp.load_single_ref_profiles(
                     file_path, header=self.header, start=self.start, end=self.end
                 )
-                self.process_header(rp, self.header, get_max)
+            except ValueError as e:
+                print(f"{e}. Skipping.")
+                continue
+            spd = DataForPlot(rp, self.header, abund=self.abund)
+            if self.cov:
+                spd.convert_to_coverage(abund=self.abund)
             else:
-                print(f"File {file_path} not found. Skipping.")
-        except Exception as e:
-            print(f"An error occurred: {e}")
-
-    def process_header(self, rp, h, get_max):
-        """
-        Processes the header information for a given alignment.
-
-        Args:
-            rp (RefProfiles): An instance of the RefProfiles class.
-            h (str): The header of the sequence.
-            get_max (bool): Whether to only get the maximum y-axis value.
-        """
-        spd = DataForPlot(rp, h, abund=self.abund)
-        self._parse_alignments(spd, h, get_max)
-
-    def _parse_alignments(self, spd, h, get_max):
-        """
-        Private method for parsing alignments.
-
-        Args:
-            spd (DataForPlot): An instance of the DataForPlot class.
-            h (str): The header of the sequence.
-            get_max (bool): Whether to only get the maximum y-axis value.
-        """
-        if self.cov:
-            spd.convert_to_coverage(abund=self.abund)
-
-        if self.se:
-            spd.convert_to_error_bounds()
+                spd.trim_margin()
+            if self.se:
+                spd.convert_to_error_bounds()
             spd.flatten(self.smoothing_window)
-            if get_max:
-                self.ylim_set = max(
-                    self.ylim_set, max(spd.y_flat[2]), abs(min(spd.y_flat[3]))
+            prepared[srna_len] = spd
+        return prepared
+
+    @staticmethod
+    def _max_abundance(prepared):
+        """
+        The largest absolute plotted value across all prepared lengths, both strands.
+        """
+        y_max = 0.0
+        for spd in prepared.values():
+            n_cols = spd.fwd.shape[1]
+            for i in range(n_cols):
+                y_max = max(
+                    y_max, spd.y_flat[i].max(), abs(spd.y_flat[i + n_cols].min())
                 )
-            else:
-                self.single_plot(spd, h)  # Call single_plot only if get_max is False
-        else:
-            spd.flatten(self.smoothing_window)
-            if get_max:
-                for i in range(spd.replicates):
-                    self.ylim_set = max(
-                        self.ylim_set,
-                        max(spd.y_flat[i]),
-                        abs(min(spd.y_flat[i + spd.replicates])),
-                    )
-            else:
-                self.single_plot(spd, h)  # Call single_plot only if get_max is False
+        return y_max
 
     def single_plot(self, spd, header):
         """
-        Plots the data for a single sequence based on its reference profiles.
+        Plots the prepared data for a single sRNA length.
 
         Args:
-            spd (DataForPlot): An instance of the DataForPlot class.
+            spd (DataForPlot): Prepared (transformed and flattened) plot data.
             header (str): The header of the sequence.
         """
         ax1 = plt.gca()  # primary axis
@@ -814,44 +903,25 @@ class AlignmentPlot:
 
         self.configure_plot_axes(ax1, ax2)
         ax2.yaxis.tick_left()
-        cols = {
-            18: "#f781bf",
-            19: "#a65628",
-            20: "#984ea3",
-            21: "red",
-            22: "blue",
-            23: "#999999",
-            24: "darkgreen",
-            25: "brown",
-            26: "#dede00",
-            27: "orange",
-            28: "yellow",
-        }
 
-        try:
-            ax2.plot(spd.x_axis, [0] * len(spd.x_axis), color="grey", linewidth=0.5)
-            self.set_plot_title(ax2, header)
+        ax2.plot(spd.x_axis, np.zeros(len(spd.x_axis)), color="grey", linewidth=0.5)
+        self.set_plot_title(ax2, header)
 
-            if self.cov:
-                spd.convert_to_coverage(abund=self.abund)
+        color = color_for_length(spd.srna_len)
+        if self.se:
+            self.plot_with_error_bounds(ax2, spd, color)
+        else:
+            self.plot_reps_individually(ax2, spd, color)
 
-            if self.se:
-                self.plot_with_error_bounds(ax2, spd, cols)
-            else:
-                self.plot_reps_individually(ax2, spd, cols)
+        if self.start is not None:
+            x_ticks = ax2.get_xticks()
+            ax2.set_xticks(x_ticks, [int(x + self.start) for x in x_ticks])
 
-            if self.start is not None:
-                x_ticks = ax2.get_xticks()
-                ax2.set_xticks(x_ticks, [int(x + self.start) for x in x_ticks])
-
-            ax2.yaxis.set_label_coords(-0.1, 0.5)
-            handles, labels = ax2.get_legend_handles_labels()
-            self.all_handles.extend(handles)
-            self.all_labels.extend(labels)
-            return handles, labels
-
-        except Exception as e:
-            print(f"An error occurred while plotting: {e}")
+        ax2.yaxis.set_label_coords(-0.1, 0.5)
+        handles, labels = ax2.get_legend_handles_labels()
+        self.all_handles.extend(handles)
+        self.all_labels.extend(labels)
+        return handles, labels
 
     def configure_plot_axes(self, ax1, ax2):
         """
@@ -880,70 +950,49 @@ class AlignmentPlot:
             title += f" from position {self.start} to {self.end}"
         ax2.set_title(title)
 
-    def plot_with_error_bounds(self, ax2, spd, cols):
+    def plot_with_error_bounds(self, ax2, spd, color):
         """
-        Plots the data with error bounds.
+        Plots the mean +/- standard error ribbon for each strand.
 
         Args:
             ax2: The secondary axis.
-            spd (DataForPlot): An instance of the DataForPlot class.
-            cols (dict): Dictionary of colors.
+            spd (DataForPlot): Prepared plot data; y_flat holds
+                [fwd_lower, fwd_upper, rvs_lower, rvs_upper].
+            color: Plot color for this sRNA length.
         """
-        spd.convert_to_error_bounds()
-        spd.flatten(self.smoothing_window)
         ax2.fill_between(
             spd.x_axis,
             spd.y_flat[0],
-            spd.y_flat[2],
-            color=cols[spd.srna_len],
+            spd.y_flat[1],
+            color=color,
             alpha=0.4,
             label=str(spd.srna_len) + " nt",
         )
         ax2.fill_between(
             spd.x_axis,
-            spd.y_flat[1],
+            spd.y_flat[2],
             spd.y_flat[3],
-            color=cols[spd.srna_len],
+            color=color,
             alpha=0.4,
         )
 
-    def plot_reps_individually(self, ax2, spd, cols):
+    def plot_reps_individually(self, ax2, spd, color):
         """
-        Plots the data without error bounds.
+        Plots each replicate's forward and reverse strand traces.
 
         Args:
             ax2: The secondary axis.
-            spd (DataForPlot): An instance of the DataForPlot class.
-            cols (dict): Dictionary of colors.
+            spd (DataForPlot): Prepared plot data; y_flat holds all forward
+                replicate columns followed by all (negated) reverse columns.
+            color: Plot color for this sRNA length.
         """
-        spd.flatten(self.smoothing_window)
-        first = True
         for i in range(spd.replicates):
-            if first:
-                ax2.plot(
-                    spd.x_axis,
-                    spd.y_flat[i],
-                    spd.y_flat[i + spd.replicates],
-                    color=cols[spd.srna_len],
-                    alpha=0.8,
-                    label=str(spd.srna_len) + " nt",
-                )
-                first = False
-            else:
-                ax2.plot(
-                    spd.x_axis,
-                    spd.y_flat[i],
-                    spd.y_flat[i + spd.replicates],
-                    color=cols[spd.srna_len],
-                    alpha=0.8,
-                )
-            ax2.fill_between(
-                spd.x_axis,
-                spd.y_flat[i],
-                spd.y_flat[i + spd.replicates],
-                color=cols[spd.srna_len],
-                alpha=0.05,
-            )
+            fwd = spd.y_flat[i]
+            rvs = spd.y_flat[i + spd.replicates]
+            label = str(spd.srna_len) + " nt" if i == 0 else None
+            ax2.plot(spd.x_axis, fwd, color=color, alpha=0.8, label=label)
+            ax2.plot(spd.x_axis, rvs, color=color, alpha=0.8)
+            ax2.fill_between(spd.x_axis, fwd, rvs, color=color, alpha=0.05)
 
     def save_plot(self):
         if isinstance(self.header, list):
@@ -959,7 +1008,7 @@ class AlignmentPlot:
 
 def comma_separated_ints(value):
     """
-    Saves the generated plot as an SVG file.
+    Parses a comma-separated string of integers into a list.
     """
     try:
         return [int(v) for v in value.split(",")]
@@ -1049,7 +1098,11 @@ def main():
     )
 
     # Generate the plot
-    plotter.generate_plot()
+    try:
+        plotter.generate_plot()
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
 # Note: Add the following lines to trigger the main() function when the script is executed:

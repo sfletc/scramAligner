@@ -31,80 +31,215 @@
 package scramPkg
 
 import (
+	"fmt"
+	"runtime"
+	"sort"
 	"sync"
 )
 
-// AlignReads aligns reads of  length nt to one or more reference sequences, with exact matches in forward or reverse
-// complement accepted.
-// A map of ref_header:[srna_seq:[pos,pos,...],...] is returned.
-func AlignReads(seq_map map[string]interface{}, ref_slice []*HeaderRef, nt int) map[string]map[string][]int {
+// MaxAlignLen is the longest read length that can be aligned (a 2-bit packed
+// read must fit in a uint64).
+const MaxAlignLen = 32
+
+// baseCode maps A/C/G/T to 2-bit codes; every other byte is invalid (0xFF).
+// Complement of a valid code c is 3-c.
+var baseCode = func() [256]byte {
+	var t [256]byte
+	for i := range t {
+		t[i] = 0xFF
+	}
+	t['A'] = 0
+	t['C'] = 1
+	t['G'] = 2
+	t['T'] = 3
+	return t
+}()
+
+// ReadIndex holds, for each requested read length, a map from the 2-bit packed
+// read sequence to the read string. Packed uint64 keys make the per-position
+// lookups while scanning a reference much cheaper than hashing 18-32 byte
+// string keys, and the per-length buckets keep each map small.
+type ReadIndex map[int]map[uint64]string
+
+// IndexReads packs all reads of the requested lengths into a ReadIndex.
+// Reads containing non-ACGT characters cannot be packed and are excluded from
+// alignment — such reads could previously only exact-match reference runs of
+// the same ambiguity characters, which produced phantom alignments.
+func IndexReads(seqMap map[string][]float64, lengths []int) ReadIndex {
+	index := make(ReadIndex, len(lengths))
+	for _, l := range lengths {
+		index[l] = make(map[uint64]string)
+	}
+	skipped := 0
+	for srna := range seqMap {
+		bucket, ok := index[len(srna)]
+		if !ok {
+			continue
+		}
+		packed, ok := packSeq(srna)
+		if !ok {
+			skipped++
+			continue
+		}
+		bucket[packed] = srna
+	}
+	if skipped > 0 {
+		fmt.Printf("%v reads containing non-ACGT characters excluded from alignment\n", skipped)
+	}
+	return index
+}
+
+// packSeq 2-bit encodes a sequence of up to MaxAlignLen bases.
+func packSeq(seq string) (uint64, bool) {
+	if len(seq) > MaxAlignLen {
+		return 0, false
+	}
+	var packed uint64
+	for i := 0; i < len(seq); i++ {
+		code := baseCode[seq[i]]
+		if code == 0xFF {
+			return 0, false
+		}
+		packed = packed<<2 | uint64(code)
+	}
+	return packed, true
+}
+
+// refAlignments carries one reference's alignments for every requested length.
+type refAlignments struct {
+	header   string
+	byLength map[int]map[string][]int
+}
+
+// AlignReadsMulti aligns reads of all requested lengths to one or more reference
+// sequences in a single pass per reference, with exact matches in forward or
+// reverse complement accepted. It returns one ref_header:[srna_seq:[pos,pos,...],...]
+// map per requested length. Positions are 1-based coordinates of the leftmost
+// aligned base on the forward strand, negated for reverse-strand alignments;
+// each position slice is sorted ascending.
+func AlignReadsMulti(index ReadIndex, refSlice []*HeaderRef, lengths []int) map[int]map[string]map[string][]int {
+	uniqueLengths := dedupeLengths(lengths)
+	for _, l := range uniqueLengths {
+		if l < 1 || l > MaxAlignLen {
+			fmt.Printf("Can't align %v nt reads: lengths must be between 1 and %v\n", l, MaxAlignLen)
+			errorShutdown()
+		}
+	}
+
 	wg := &sync.WaitGroup{}
-	wg.Add(len(ref_slice))
-
-	ref_seq_chan := make(chan *HeaderRef, len(ref_slice))
-	for _, header_ref_pair := range ref_slice {
-		ref_seq_chan <- header_ref_pair
+	refSeqChan := make(chan *HeaderRef, len(refSlice))
+	for _, headerRefPair := range refSlice {
+		refSeqChan <- headerRefPair
 	}
-	close(ref_seq_chan)
+	close(refSeqChan)
 
-	header_map_chan := make(chan map[string]map[string][]int, 1)
-	for a := 0; a < len(ref_slice); a++ {
-		go worker_go(seq_map, ref_seq_chan, nt, header_map_chan, wg)
+	resultChan := make(chan refAlignments, len(refSlice))
+	workers := runtime.NumCPU()
+	if workers > len(refSlice) {
+		workers = len(refSlice)
 	}
-	go func(cs chan map[string]map[string][]int, wg *sync.WaitGroup) {
+	if workers < 1 {
+		workers = 1
+	}
+	wg.Add(workers)
+	for a := 0; a < workers; a++ {
+		go func() {
+			defer wg.Done()
+			for refSeq := range refSeqChan {
+				resultChan <- alignSingleRef(index, refSeq, uniqueLengths)
+			}
+		}()
+	}
+	go func() {
 		wg.Wait()
-		close(cs)
-	}(header_map_chan, wg)
+		close(resultChan)
+	}()
 
-	final_alignment_map := compile_alignments(header_map_chan)
-	return final_alignment_map
-}
-
-// Align reads to individual reference sequences
-func worker_go(seq_map map[string]interface{}, ref_seqs chan *HeaderRef, nt int,
-	header_map_chan chan map[string]map[string][]int, wg *sync.WaitGroup) {
-
-	ref_seq := <-ref_seqs
-	header_mapped := make(map[string][]int)
-	mapped := make(map[string]map[string][]int, 1)
-	position := 0
-	ref_seq_len := len(ref_seq.Seq)
-	for position <= ref_seq_len-nt {
-		//each alignment position for an srna
-		fwd_seq := ref_seq.Seq[position : position+nt]
-		rvs_seq := ref_seq.ReverseSeq[position : position+nt]
-		if _, ok := seq_map[fwd_seq]; ok {
-			header_mapped[fwd_seq] = append(header_mapped[fwd_seq], 1+position)
-		}
-		if _, ok := seq_map[rvs_seq]; ok {
-			header_mapped[rvs_seq] = append(header_mapped[rvs_seq], -1-(ref_seq_len-position-nt))
-		}
-		position++
+	final := make(map[int]map[string]map[string][]int, len(uniqueLengths))
+	for _, l := range uniqueLengths {
+		final[l] = make(map[string]map[string][]int)
 	}
-	if len(header_mapped) > 0 {
-		mapped[ref_seq.Header] = header_mapped
-	}
-	header_map_chan <- mapped
-	wg.Done()
-}
-
-// compile_alignments compiles the alignments
-func compile_alignments(header_map_chan chan map[string]map[string][]int) map[string]map[string][]int {
-	final_alignment_map := make(map[string]map[string][]int)
-	for combined_alignment := range header_map_chan {
-		for header, alignment := range combined_alignment {
-			final_alignment_map[header] = alignment
+	for res := range resultChan {
+		for l, alignments := range res.byLength {
+			if len(alignments) > 0 {
+				final[l][res.header] = alignments
+			}
 		}
 	}
-	return final_alignment_map
+	return final
 }
 
-type mean_se_dup struct {
-	mean_se interface{}
-	dup     float64
+// AlignReads aligns reads of a single length nt, kept for API compatibility.
+// For multiple lengths, IndexReads + AlignReadsMulti scans each reference once in total.
+func AlignReads(seqMap map[string][]float64, refSlice []*HeaderRef, nt int) map[string]map[string][]int {
+	return AlignReadsMulti(IndexReads(seqMap, []int{nt}), refSlice, []int{nt})[nt]
 }
 
-type counts_dup struct {
-	counts []float64
-	dup    float64
+// alignSingleRef rolls a 2-bit packed window (and its reverse complement) along
+// one reference sequence, checking every requested length at each position.
+func alignSingleRef(index ReadIndex, refSeq *HeaderRef, lengths []int) refAlignments {
+	byLength := make(map[int]map[string][]int, len(lengths))
+	buckets := make([]map[uint64]string, len(lengths))
+	masks := make([]uint64, len(lengths))
+	rcShifts := make([]uint, len(lengths))
+	for i, l := range lengths {
+		byLength[l] = make(map[string][]int)
+		buckets[i] = index[l]
+		if l == MaxAlignLen {
+			masks[i] = ^uint64(0)
+		} else {
+			masks[i] = uint64(1)<<(2*uint(l)) - 1
+		}
+		rcShifts[i] = 64 - 2*uint(l)
+	}
+
+	seq := refSeq.Seq
+	// packed holds the last 32 bases 2-bit encoded, newest base in the low bits;
+	// rc holds their complements in reverse order, newest base in the high bits.
+	// A window of length l ending at p is packed&masks[i]; its reverse
+	// complement is rc>>rcShifts[i]. Windows overlapping a non-ACGT base
+	// (position <= lastInvalid) are skipped.
+	var packed, rc uint64
+	lastInvalid := -1
+	for p := 0; p < len(seq); p++ {
+		code := baseCode[seq[p]]
+		c := uint64(code)
+		if code == 0xFF {
+			lastInvalid = p
+			c = 0
+		}
+		packed = packed<<2 | c
+		rc = rc>>2 | (3-c)<<62
+		for i, l := range lengths {
+			start := p - l + 1
+			if start < 0 || start <= lastInvalid {
+				continue
+			}
+			bucket := buckets[i]
+			if srna, ok := bucket[packed&masks[i]]; ok {
+				byLength[l][srna] = append(byLength[l][srna], 1+start)
+			}
+			if srna, ok := bucket[rc>>rcShifts[i]]; ok {
+				byLength[l][srna] = append(byLength[l][srna], -1-start)
+			}
+		}
+	}
+	for _, alignments := range byLength {
+		for _, positions := range alignments {
+			sort.Ints(positions)
+		}
+	}
+	return refAlignments{refSeq.Header, byLength}
+}
+
+func dedupeLengths(lengths []int) []int {
+	seen := make(map[int]bool, len(lengths))
+	var unique []int
+	for _, l := range lengths {
+		if !seen[l] {
+			seen[l] = true
+			unique = append(unique, l)
+		}
+	}
+	return unique
 }

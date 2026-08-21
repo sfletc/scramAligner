@@ -1,7 +1,5 @@
 import warnings
 import numpy as np
-import logomaker as lm
-from IPython.display import Image, display
 import pandas as pd
 import matplotlib.pyplot as plt
 import scram2Plot.profilePlot as pp
@@ -80,7 +78,9 @@ class ScramCSV:
         if self.df is None:
             raise ValueError("No CSV data loaded. Use load_csv to load a CSV file.")
 
-        mask = self.pd.Series(np.ones(len(self.df), dtype=bool))
+        # index the mask like the DataFrame so filtering a filtered instance
+        # (whose index is no longer a fresh RangeIndex) still aligns correctly
+        mask = self.pd.Series(True, index=self.df.index)
 
         # Apply each filter on the mask
         if header is not None:
@@ -106,18 +106,21 @@ class ScramCSV:
             count_columns = filtered_df.columns[
                 filtered_df.columns.get_loc("Times aligned") + 1 :
             ]
+            if len(count_columns) == 0:
+                raise ValueError(
+                    "No read-count columns found after 'Times aligned'; count "
+                    "filtering requires the aligner's per-replicate CSV format"
+                )
             filtered_df["Mean_Count"] = filtered_df[count_columns].mean(axis=1)
 
             if min_count is not None:
                 filtered_df = filtered_df[filtered_df["Mean_Count"] >= min_count]
             if max_count is not None:
                 filtered_df = filtered_df[filtered_df["Mean_Count"] <= max_count]
-
-        # If you don't need the 'Mean_Count' column in the output, uncomment the following line
-        filtered_df = filtered_df.drop(columns=["Mean_Count"])
+            filtered_df = filtered_df.drop(columns=["Mean_Count"])
 
         # Create a new instance of the class with the filtered DataFrame
-        filtered_instance = self.__class__()
+        filtered_instance = self.__class__(engine=self.engine)
         filtered_instance.df = filtered_df
         filtered_instance.srna_len = self.srna_len
         return filtered_instance
@@ -144,6 +147,8 @@ class ScramCSV:
             raise ValueError(
                 "No data to generate a sequence logo from. Use load_csv or subset_data to load or filter data."
             )
+
+        import logomaker as lm  # deferred: heavy optional dependency
 
         # Extract 'sRNA' sequences from the DataFrame
         seqs = self.df["sRNA"].tolist()
@@ -188,30 +193,41 @@ class ScramCSV:
         self.df.to_csv(file_path, index=False)
 
     def calculate_min_free_energy(self, ref_file, down=100, up=100):
-            """
-            Calculate the minimum free energy for each sRNA using the SectStruct class.
-            
-            Args:
-                ref_file (str): Path to the reference FASTA file.
-            """
-            if self.df is None:
-                raise ValueError("No data to operate on. Use load_csv or subset_data to load or filter data.")
-            
-            # Create empty columns to store calculated min_free_energy
-            self.df['Min_Free_Energy'] = np.nan
+        """
+        Calculate the minimum free energy of the folded window around each sRNA.
 
-            
-            for index, row in self.df.iterrows():
-                try:
-                    header = row['Header']
-                    position = row['Position']
-                
-                # Initialize SectStruct object and get sequences
-                    sect_struct = pp.SectStruct(ref_file, header, position-down, position+up)
-                
-                # Store the calculated min_free_energy in the DataFrame
-                    self.df.at[index, 'Min_Free_Energy'] = sect_struct.min_free_energy
-                except:
-                    print("error for {} - {}".format(header, position))
+        The reference FASTA is indexed once (not re-parsed per row), windows are
+        clamped to the sequence bounds, and identical windows are folded only once.
+
+        Args:
+            ref_file (str): Path to the reference FASTA file.
+            down (int): Bases to include upstream of the alignment position.
+            up (int): Bases to include downstream of the alignment position.
+        """
+        if self.df is None:
+            raise ValueError(
+                "No data to operate on. Use load_csv or subset_data to load or filter data."
+            )
+
+        from Bio import SeqIO
+        from ViennaRNA import RNA
+
+        ref_index = SeqIO.index(ref_file, "fasta")
+        sequences = {}
+        fold_cache = {}
+        energies = []
+        for header, position in zip(self.df["Header"], self.df["Position"]):
+            if header not in sequences:
+                if header not in ref_index:
+                    raise ValueError(
+                        f"Header {header} not found in reference file {ref_file}"
+                    )
+                sequences[header] = str(ref_index[header].seq)
+            seq = sequences[header]
+            window = seq[max(0, position - down) : min(len(seq), position + up)]
+            if window not in fold_cache:
+                fold_cache[window] = RNA.fold(window)[1]
+            energies.append(fold_cache[window])
+        self.df["Min_Free_Energy"] = energies
 
 

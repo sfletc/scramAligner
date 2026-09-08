@@ -93,19 +93,41 @@ func align(cmd *cobra.Command, args []string) {
 		fmt.Println("\nCan't parse read file type " + readFileType)
 		os.Exit(1)
 	}
+	var lengths []int
+	seenLengths := make(map[int]bool)
+	for _, ntStr := range strings.Split(length, ",") {
+		nt, err := strconv.Atoi(strings.TrimSpace(ntStr))
+		if err != nil {
+			fmt.Println("\nCan't parse read length '" + ntStr + "'")
+			os.Exit(1)
+		}
+		if nt < 1 || nt > scramPkg.MaxAlignLen {
+			fmt.Printf("\nCan't align %v nt reads: lengths must be between 1 and %v\n", nt, scramPkg.MaxAlignLen)
+			os.Exit(1)
+		}
+		if nt < minLen || nt > maxLen {
+			fmt.Printf("\nWarning: requested length %v is outside --minLen/--maxLen (%v-%v); no reads of this length are loaded\n",
+				nt, minLen, maxLen)
+		}
+		if !seenLengths[nt] {
+			seenLengths[nt] = true
+			lengths = append(lengths, nt)
+		}
+	}
 	t0 := time.Now()
-	var a map[string]interface{}
-	var fileOrder []string
 
 	fmt.Println("\nLoading individual read counts")
-	a, fileOrder = scramPkg.IndvSeqLoad(strings.Split(fastaSet1, ","), readFileType, adapter, minLen, maxLen, minCount, noNorm)
+	a, fileOrder := scramPkg.IndvSeqLoad(strings.Split(fastaSet1, ","), readFileType, adapter, minLen, maxLen, minCount, noNorm)
 
 	fmt.Println("\nLoading reference")
 	c := scramPkg.RefLoad(alignTo)
-	for _, nt := range strings.Split(length, ",") {
-		nt, _ := strconv.Atoi(nt)
-		fmt.Printf("\nAligning %v nt reads\n", nt)
-		d := scramPkg.AlignReads(a, c, nt)
+
+	fmt.Println("\nAligning reads")
+	alignments := scramPkg.AlignReadsMulti(scramPkg.IndexReads(a, lengths), c, lengths)
+	for _, nt := range lengths {
+		fmt.Printf("\nProfiling %v nt alignments\n", nt)
+		d := alignments[nt]
+		delete(alignments, nt)
 		switch {
 		case !noSplit:
 			e := scramPkg.ProfileSplit(d, a)
@@ -113,7 +135,6 @@ func align(cmd *cobra.Command, args []string) {
 		default:
 			e := scramPkg.ProfileNoSplit(d, a)
 			scramPkg.ProfileToCsv(e, c, nt, outFilePrefix, fileOrder)
-
 		}
 	}
 	t1 := time.Now()

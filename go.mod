@@ -1,10 +1,10 @@
 module scramAligner
 
-go 1.18
+go 1.24
 
 require (
 	github.com/dustin/go-humanize v1.0.1
-	github.com/montanaflynn/stats v0.7.0
+	github.com/klauspost/compress v1.19.2
 	github.com/spf13/cobra v1.7.0
 )
 

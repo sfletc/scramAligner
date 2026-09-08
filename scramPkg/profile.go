@@ -31,76 +31,71 @@
 package scramPkg
 
 import (
+	"bufio"
 	"encoding/csv"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
 )
 
-// Details of an alignment for a discrete srna - meanSe
+// singleAlignment holds the details of one alignment of a discrete srna.
 type singleAlignment struct {
 	Seq          string // Seq is an aligned read sequence
 	timesAligned int    // No of times the read has aligned
-	Pos          int    // Pos is an aligned read position (from 5' fwd, starting at 1)
-	Strand       string // Strand
-	Alignments   interface{}
+	// Pos is the 1-based forward-strand coordinate of the leftmost aligned base for
+	// both strands. For "+" alignments this is the read's 5' end; for "-" alignments
+	// it is the read's 3' end.
+	Pos        int
+	Strand     string    // Strand
+	Alignments []float64 // Per-read-file counts (may be shared between alignments of the same read)
 }
 
 // collection for sorting
 type singleAlignments []*singleAlignment
 
-func (slice singleAlignments) Len() int {
-	return len(slice)
-}
-func (slice singleAlignments) Less(i, j int) bool {
-	return slice[i].Pos < slice[j].Pos
-}
-func (slice singleAlignments) Swap(i, j int) {
-	slice[i], slice[j] = slice[j], slice[i]
+// sortAlignments orders alignments by position, then strand ("+" before "-"), then
+// read sequence, so output row order is deterministic across runs.
+func sortAlignments(alignments singleAlignments) {
+	sort.Slice(alignments, func(i, j int) bool {
+		a, b := alignments[i], alignments[j]
+		if a.Pos != b.Pos {
+			return a.Pos < b.Pos
+		}
+		if a.Strand != b.Strand {
+			return a.Strand < b.Strand
+		}
+		return a.Seq < b.Seq
+	})
 }
 
-// ProfileNoSplit takes and alignment map and a sequence map as an input.  It returns a map of single alignments
-// with a reference header as key and a single alignments struct as value.  Each single alignments struct is comprised of
-// single_alignment structs (read seq, position, count, se).  The count for each read alignment is NOT split by the
-// number of times a read aligns.
-func ProfileNoSplit(alignmentMap map[string]map[string][]int, seqMap map[string]interface{}) map[string]interface{} {
+// ProfileNoSplit takes an alignment map and a sequence map as an input.  It returns a map of single alignments
+// with a reference header as key and a single alignments struct as value.  The count for each read alignment
+// is NOT split by the number of times a read aligns.
+func ProfileNoSplit(alignmentMap map[string]map[string][]int, seqMap map[string][]float64) map[string]*singleAlignments {
 	srnaAlignmentMap := calcTimesReadAligns(alignmentMap)
-	profileAlignmentsMap := make(map[string]interface{})
+	profileAlignmentsMap := make(map[string]*singleAlignments)
 	for header, alignments := range alignmentMap {
 		var combinedAlignments singleAlignments
 		for srna, positions := range alignments {
+			counts := seqMap[srna]
+			timesAligned := srnaAlignmentMap[srna]
 			for _, position := range positions {
 				switch {
 				case position > 0:
-					switch v := seqMap[srna].(type) {
-					case *meanSe:
-						alignment := singleAlignment{srna, srnaAlignmentMap[srna],
-							position, "+", &meanSe{v.Mean, v.Se}}
-						combinedAlignments = append(combinedAlignments, &alignment)
-					case *[]float64:
-						alignment := singleAlignment{srna, srnaAlignmentMap[srna],
-							position, "+", v}
-						combinedAlignments = append(combinedAlignments, &alignment)
-					}
+					combinedAlignments = append(combinedAlignments,
+						&singleAlignment{srna, timesAligned, position, "+", counts})
 				case position < 0:
-					switch v := seqMap[srna].(type) {
-					case *meanSe:
-						alignment := singleAlignment{srna, srnaAlignmentMap[srna],
-							0 - position, "-", &meanSe{v.Mean, v.Se}}
-						combinedAlignments = append(combinedAlignments, &alignment)
-					case *[]float64:
-						alignment := singleAlignment{srna, srnaAlignmentMap[srna],
-							0 - position, "-", v}
-						combinedAlignments = append(combinedAlignments, &alignment)
-					}
+					combinedAlignments = append(combinedAlignments,
+						&singleAlignment{srna, timesAligned, 0 - position, "-", counts})
 				}
 			}
 		}
-		sort.Sort(combinedAlignments)
+		sortAlignments(combinedAlignments)
 		profileAlignmentsMap[header] = &combinedAlignments
 	}
 	return profileAlignmentsMap
@@ -113,32 +108,26 @@ type alignmentStruct struct {
 
 type outputStruct struct {
 	header             string
-	combinedAlignments interface{}
+	combinedAlignments *singleAlignments
 }
 
-// Calculates the number of times an aligned read aligns
+// calcTimesReadAligns calculates the number of times an aligned read aligns across all references
 func calcTimesReadAligns(alignmentMap map[string]map[string][]int) map[string]int {
 	srnaAlignmentMap := make(map[string]int)
 	for _, alignment := range alignmentMap {
 		for srna, pos := range alignment {
-			if _, ok := srnaAlignmentMap[srna]; ok {
-				srnaAlignmentMap[srna] += len(pos)
-			} else {
-				srnaAlignmentMap[srna] = len(pos)
-			}
+			srnaAlignmentMap[srna] += len(pos)
 		}
 	}
 	return srnaAlignmentMap
 }
 
-// ProfileSplit takes and alignment map and a sequence map as an input.  It returns a map of single alignments
-// with a reference header as key and a single alignments struct as value.  Each single alignments struct is comprised
-// of single_alignment structs (read seq, position, count, se).  The count for each read alignment is split by the
-// number of times a read aligns.
-func ProfileSplit(alignmentMap map[string]map[string][]int, seqMap map[string]interface{}) map[string]interface{} {
+// ProfileSplit takes an alignment map and a sequence map as an input.  It returns a map of single alignments
+// with a reference header as key and a single alignments struct as value.  The count for each read alignment
+// is split by the number of times the read aligns.
+func ProfileSplit(alignmentMap map[string]map[string][]int, seqMap map[string][]float64) map[string]*singleAlignments {
 	alignmentsNo := len(alignmentMap)
 	wg := &sync.WaitGroup{}
-	wg.Add(alignmentsNo)
 
 	srnaAlignmentMap := calcTimesReadAligns(alignmentMap)
 
@@ -147,18 +136,27 @@ func ProfileSplit(alignmentMap map[string]map[string][]int, seqMap map[string]in
 
 	for header, alignments := range alignmentMap {
 		alignmentsForGoroutine <- alignmentStruct{header, alignments}
-
 	}
-	for a := 0; a < alignmentsNo; a++ {
+	close(alignmentsForGoroutine)
+
+	workers := runtime.NumCPU()
+	if workers > alignmentsNo {
+		workers = alignmentsNo
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	wg.Add(workers)
+	for a := 0; a < workers; a++ {
 		go profileSplitWorker(alignmentsForGoroutine, outputFromGoroutine, seqMap, srnaAlignmentMap, wg)
 	}
 
-	go func(cs chan outputStruct, wg *sync.WaitGroup) {
+	go func() {
 		wg.Wait()
-		close(cs)
-	}(outputFromGoroutine, wg)
+		close(outputFromGoroutine)
+	}()
 
-	profileAlignmentsMap := make(map[string]interface{})
+	profileAlignmentsMap := make(map[string]*singleAlignments)
 	for singleOutputStruct := range outputFromGoroutine {
 		profileAlignmentsMap[singleOutputStruct.header] = singleOutputStruct.combinedAlignments
 	}
@@ -167,104 +165,81 @@ func ProfileSplit(alignmentMap map[string]map[string][]int, seqMap map[string]in
 }
 
 func profileSplitWorker(alignmentsForGoroutine chan alignmentStruct, outputFromGoroutine chan outputStruct,
-	seqMap map[string]interface{}, srnaAlignmentMap map[string]int, wg *sync.WaitGroup) {
-	singleAlign := <-alignmentsForGoroutine
-	var combinedAlignmentsMeanSe singleAlignments
-	for srna, positions := range singleAlign.alignments {
-		for _, position := range positions {
-			switch v := seqMap[srna].(type) {
-			case *meanSe:
-				splitCountMean := v.Mean / float64(srnaAlignmentMap[srna])
-				splitSe := v.Se / float64(srnaAlignmentMap[srna])
+	seqMap map[string][]float64, srnaAlignmentMap map[string]int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for singleAlign := range alignmentsForGoroutine {
+		var combinedAlignments singleAlignments
+		for srna, positions := range singleAlign.alignments {
+			counts := seqMap[srna]
+			timesAligned := srnaAlignmentMap[srna]
+			splitCounts := make([]float64, len(counts))
+			for i, count := range counts {
+				splitCounts[i] = count / float64(timesAligned)
+			}
+			for _, position := range positions {
 				switch {
 				case position > 0:
-					alignment := singleAlignment{srna, srnaAlignmentMap[srna],
-						position, "+", &meanSe{splitCountMean, splitSe}}
-					combinedAlignmentsMeanSe = append(combinedAlignmentsMeanSe, &alignment)
+					combinedAlignments = append(combinedAlignments,
+						&singleAlignment{srna, timesAligned, position, "+", splitCounts})
 				case position < 0:
-					alignment := singleAlignment{srna, srnaAlignmentMap[srna],
-						0 - position, "-", &meanSe{splitCountMean, splitSe}}
-					combinedAlignmentsMeanSe = append(combinedAlignmentsMeanSe, &alignment)
-				}
-			case *[]float64:
-				var splitCounts []float64
-				for _, i := range *v {
-					splitCounts = append(splitCounts, i/float64(srnaAlignmentMap[srna]))
-				}
-				switch {
-				case position > 0:
-					alignment := singleAlignment{srna, srnaAlignmentMap[srna],
-						position, "+", &splitCounts}
-					combinedAlignmentsMeanSe = append(combinedAlignmentsMeanSe, &alignment)
-				case position < 0:
-					alignment := singleAlignment{srna, srnaAlignmentMap[srna],
-						0 - position, "-", &splitCounts}
-					combinedAlignmentsMeanSe = append(combinedAlignmentsMeanSe, &alignment)
+					combinedAlignments = append(combinedAlignments,
+						&singleAlignment{srna, timesAligned, 0 - position, "-", splitCounts})
 				}
 			}
 		}
+		sortAlignments(combinedAlignments)
+		outputFromGoroutine <- outputStruct{singleAlign.header, &combinedAlignments}
 	}
-
-	sort.Sort(combinedAlignmentsMeanSe)
-	outputFromGoroutine <- outputStruct{singleAlign.header, &combinedAlignmentsMeanSe}
-	wg.Done()
 }
 
-// ProfileToCsv writes the  den results to a csv file
-func ProfileToCsv(profileAlignmentsMap map[string]interface{}, refSlice []*HeaderRef, nt int, outPrefix string, fileOrder []string) {
+// ProfileToCsv streams the profile results to a csv file (one row per alignment).
+func ProfileToCsv(profileAlignmentsMap map[string]*singleAlignments, refSlice []*HeaderRef, nt int,
+	outPrefix string, fileOrder []string) {
+	outFile := outPrefix + "_" + strconv.Itoa(nt) + ".csv"
+	outDir := filepath.Dir(outFile)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		fmt.Println("Can't create output directory " + outDir + ": " + err.Error())
+		errorShutdown()
+	}
+	f, err := os.Create(outFile)
+	if err != nil {
+		fmt.Println("Can't open csv file for writing: " + err.Error())
+		errorShutdown()
+	}
+	bw := bufio.NewWriterSize(f, 1<<20)
+	w := csv.NewWriter(bw)
 
-	firstRow := true
-	var rows [][]string
+	headerRow := append([]string{"Header", "len", "sRNA", "Position", "Strand", "Times aligned"}, fileOrder...)
+	if err := w.Write(headerRow); err != nil {
+		log.Fatalln("error writing csv:", err)
+	}
+	row := make([]string, 0, len(headerRow))
 	for _, ref := range refSlice {
-		if alignments, ok := profileAlignmentsMap[ref.Header]; ok {
-			for _, alignment := range *alignments.(*singleAlignments) {
-				switch v := alignment.Alignments.(type) {
-				case *meanSe:
-					if firstRow {
-						rows = [][]string{
-							{"Header", "len", "sRNA", "Position", "Strand", "Count", "Std. Err", "Times aligned"},
-						}
-						firstRow = false
-					}
-					row := []string{ref.Header, strconv.Itoa(len(ref.Seq)),
-						alignment.Seq, strconv.Itoa(alignment.Pos),
-						alignment.Strand,
-						strconv.FormatFloat(v.Mean, 'f', 3, 64),
-						strconv.FormatFloat(v.Se, 'f', 8, 64),
-						strconv.Itoa(alignment.timesAligned)}
-					rows = append(rows, row)
-				case *[]float64:
-					if firstRow {
-						row := []string{"Header", "len", "sRNA", "Position", "Strand", "Times aligned"}
-						row = append(row, fileOrder...)
-						rows = append(rows, row)
-						firstRow = false
-					}
-
-					row := []string{ref.Header, strconv.Itoa(len(ref.Seq)),
-						alignment.Seq, strconv.Itoa(alignment.Pos),
-						alignment.Strand, strconv.Itoa(alignment.timesAligned)}
-					pos := 0
-					for pos < len(*v) {
-						row = append(row, strconv.FormatFloat((*v)[pos], 'f', 3, 64))
-						pos++
-					}
-					rows = append(rows, row)
-				}
+		alignments, ok := profileAlignmentsMap[ref.Header]
+		if !ok {
+			continue
+		}
+		refLen := strconv.Itoa(len(ref.Seq))
+		for _, alignment := range *alignments {
+			row = row[:0]
+			row = append(row, ref.Header, refLen, alignment.Seq, strconv.Itoa(alignment.Pos),
+				alignment.Strand, strconv.Itoa(alignment.timesAligned))
+			for _, v := range alignment.Alignments {
+				row = append(row, strconv.FormatFloat(v, 'f', 6, 64))
+			}
+			if err := w.Write(row); err != nil {
+				log.Fatalln("error writing csv:", err)
 			}
 		}
 	}
-	outFile := outPrefix + "_" + strconv.Itoa(nt) + ".csv"
-	outDir := filepath.Dir(outFile)
-	os.MkdirAll(outDir, 0777)
-	f, err := os.Create(outFile)
-	if err != nil {
-		fmt.Println("Can't open csv file for writing")
-		errorShutdown()
-	}
-	w := csv.NewWriter(f)
-	w.WriteAll(rows)
+	w.Flush()
 	if err := w.Error(); err != nil {
 		log.Fatalln("error writing csv:", err)
+	}
+	if err := bw.Flush(); err != nil {
+		log.Fatalln("error writing csv:", err)
+	}
+	if err := f.Close(); err != nil {
+		log.Fatalln("error closing csv:", err)
 	}
 }

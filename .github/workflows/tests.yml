@@ -1,0 +1,48 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install scram2Plot and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ./scramScripts/scram2Plot pytest
+
+      - name: Run pytest
+        working-directory: scramScripts/scram2Plot
+        env:
+          MPLBACKEND: Agg
+        run: pytest tests/ -v

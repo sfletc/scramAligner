@@ -3,6 +3,7 @@ import pytest
 
 from scram2Plot.profilePlot import (
     DNA,
+    AlignmentPlot,
     DataForPlot,
     RefProfiles,
     SingleAlignment,
@@ -196,6 +197,21 @@ def test_load_missing_header_raises(tmp_path):
         r.load_single_ref_profiles(file_path, header="no_such_header")
 
 
+@pytest.mark.parametrize("header", ["001", "NA", "N/A", "null", "1e3"])
+def test_load_preserves_literal_headers(tmp_path, header):
+    path = write_csv(tmp_path, [f"{header},100,AAAA,10,+,1,1.0,2.0,3.0\n"])
+    profiles = RefProfiles()
+    profiles.load_single_ref_profiles(path, header=header)
+    assert list(profiles.single_ref_profiles) == [header]
+
+
+@pytest.mark.parametrize("missing", ["", "NA", "NaN"])
+def test_load_still_rejects_missing_counts(tmp_path, missing):
+    path = write_csv(tmp_path, [f"NA,100,AAAA,10,+,1,1.0,{missing},3.0\n"])
+    with pytest.raises(ValueError, match="missing or non-numeric"):
+        RefProfiles().load_single_ref_profiles(path)
+
+
 def test_load_subset_keeps_left_edge_overlap(tmp_path):
     # A read starting before the window but overlapping it must be kept, with a
     # negative relative position.
@@ -318,6 +334,24 @@ def test_smoothing_keeps_peak_centred():
     assert np.isclose(smoothed.sum(), 100.0)
 
 
+@pytest.mark.parametrize("length, degree", [(1, 5), (5, 4), (8, 5), (11, 5)])
+def test_smoothing_short_data_preserves_length_and_values(length, degree):
+    data = np.full(length, 7.0)
+    smoothed = DataForPlot._smoothTriangle(data, degree)
+    assert smoothed.shape == data.shape
+    assert np.allclose(smoothed, data)
+
+
+def test_smoothing_short_plot_saves(tmp_path, monkeypatch):
+    monkeypatch.setattr("matplotlib.pyplot.show", lambda: None)
+    write_csv(tmp_path, ["r1,8,AAAA,1,+,1,1.0,2.0,3.0\n"], name="short_4.csv")
+    AlignmentPlot(
+        str(tmp_path / "short"), [4], "r1", smoothing_window=5,
+        cov=True, abund=False, se=False,
+    ).generate_plot()
+    assert (tmp_path / "short_r1.svg").stat().st_size > 0
+
+
 def test_data_for_plot_round_trip(tmp_path):
     # synthetic CSV -> DataForPlot -> coverage; total mass must be conserved
     r = RefProfiles()
@@ -377,6 +411,43 @@ def test_subset_left_edge_coverage(tmp_path):
     assert np.array_equal(
         spd_sub.fwd[: end - start + 1], spd_full.fwd[start : end + 1]
     )
+
+
+@pytest.mark.parametrize("abund", [False, True])
+@pytest.mark.parametrize("start,end,padding", [(50, 100, 0), (50, 55, 0), (90, 90, 2)])
+def test_subset_coverage_matches_full_at_both_edges(tmp_path, abund, start, end, padding):
+    rows = [
+        f"r1,200,{'A' * 21},{pos},{strand},1,{i + 1},{i + 2},{i + 3}\n"
+        for i, pos in enumerate([29, 31, 48, 50, 60, 80, 90, 100, 101])
+        for strand in ["+", "-"]
+    ]
+    path = write_csv(tmp_path, rows, name="edges_21.csv")
+    full = RefProfiles()
+    full.load_single_ref_profiles(path)
+    full_data = DataForPlot(full, "r1", abund=abund)
+    full_data.convert_to_coverage(abund=abund)
+
+    subset = RefProfiles()
+    subset.load_single_ref_profiles(path, header="r1", start=start, end=end, padding=padding)
+    subset_data = DataForPlot(subset, "r1", abund=abund)
+    subset_data.convert_to_coverage(abund=abund)
+    subset_data.flatten()
+    for strand in ["fwd", "rvs"]:
+        expected = getattr(full_data, strand)[start - padding : end + padding + 1]
+        assert np.array_equal(getattr(subset_data, strand), expected)
+    assert all(len(y) == len(subset_data.x_axis) for y in subset_data.y_flat)
+
+
+def test_subset_without_coverage_trims_both_margins(tmp_path):
+    path = write_csv(tmp_path, [f"r1,200,{'A' * 21},100,+,1,1,2,3\n"])
+    profiles = RefProfiles()
+    profiles.load_single_ref_profiles(path, start=50, end=100)
+    data = DataForPlot(profiles, "r1")
+    data.trim_margin()
+    data.flatten()
+    assert data.fwd.shape == (51, 3)
+    assert data.fwd[-1].tolist() == [1, 2, 3]
+    assert all(len(y) == len(data.x_axis) for y in data.y_flat)
 
 
 def test_color_for_length_fallback():

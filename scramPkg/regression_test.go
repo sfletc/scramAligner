@@ -3,12 +3,121 @@
 package scramPkg
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestLoadFasta_wrappedRecords(t *testing.T) {
+	seq := "ACGTACGTACGTACGTACGTA"
+	for _, fileType := range []string{"fa", "cfa", "clean"} {
+		t.Run(fileType, func(t *testing.T) {
+			header := func(id int) string {
+				switch fileType {
+				case "cfa":
+					return fmt.Sprintf(">%d-1\n", id)
+				case "clean":
+					return fmt.Sprintf(">%d 1\n", id)
+				default:
+					return fmt.Sprintf(">%d\n", id)
+				}
+			}
+			// The long record must not be counted as a 21-nt read, and the last
+			// wrapped record must be flushed even without a final newline.
+			content := header(1) + seq[:10] + "\n" + seq[10:] + "\n" +
+				header(2) + seq + "\n" + seq + "\n" +
+				header(3) + strings.ToLower(seq[:15]) + "\n" + seq[15:]
+			path := writeTempFile(t, "wrapped.fa", content)
+			got, _ := IndvSeqLoad([]string{path}, fileType, "nil", 18, 32, 1, true)
+			want := map[string][]float64{seq: {2}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestLoadFastx_trimsCompleteRecords(t *testing.T) {
+	seq := "ACGTACGTACGTACGTACGTA"
+	adapter := "AGATCGGAAGAG"
+	for _, fileType := range []string{"fa", "fq"} {
+		t.Run(fileType, func(t *testing.T) {
+			content := ">r1\n" + seq + adapter[:5] + "\n" + adapter[5:]
+			if fileType == "fq" {
+				// Quality length must be checked against the untrimmed sequence.
+				content = "@r1\n" + seq + adapter + "\n+r1\n" + strings.Repeat("@", len(seq+adapter))
+			}
+			path := writeTempFile(t, "reads."+fileType, content)
+			got, _ := IndvSeqLoad([]string{path}, fileType, adapter, 18, 32, 1, true)
+			want := map[string][]float64{seq: {1}}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestLoadCfa_minCountAfterAggregation(t *testing.T) {
+	seq := "ACGTACGTACGTACGTACGTA"
+	for _, fileType := range []string{"cfa", "clean"} {
+		for _, noNorm := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/noNorm=%v", fileType, noNorm), func(t *testing.T) {
+				sep := "-"
+				if fileType == "clean" {
+					sep = " "
+				}
+				content := ">1" + sep + "1\n" + seq + "\n>2" + sep + "1\n" +
+					strings.ToLower(seq) + "\n>3" + sep + "1\n" + strings.Repeat("C", 21) + "\n"
+				path := writeTempFile(t, "duplicate.fa", content)
+				got, _ := IndvSeqLoad([]string{path}, fileType, "nil", 18, 32, 2, noNorm)
+				count := 2.0
+				if !noNorm {
+					count = 1000000
+				}
+				want := map[string][]float64{seq: {count}}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("got %v, want %v", got, want)
+				}
+			})
+		}
+	}
+}
+
+func TestLoadFastq_rejectsMalformed(t *testing.T) {
+	// The public loader exits on malformed input, so exercise it in a child
+	// test process and assert that callers receive a nonzero exit status.
+	if path := os.Getenv("SCRAM_TEST_FASTQ_FILE"); path != "" {
+		IndvSeqLoad([]string{path}, "fq", "nil", 18, 32, 1, true)
+		return
+	}
+	seq := "ACGTACGTACGTACGTACGTA"
+	valid := "@r1\n" + seq + "\n+\n" + strings.Repeat("F", len(seq)) + "\n"
+	for name, content := range map[string]string{
+		"missing_sequence":  "@r1\n",
+		"missing_separator": "@r1\n" + seq + "\n",
+		"missing_quality":   "@r1\n" + seq + "\n+\n",
+		"short_quality":     "@r1\n" + seq + "\n+\nFFF\n",
+		"long_quality":      "@r1\n" + seq + "\n+\n" + strings.Repeat("F", len(seq)+1) + "\n",
+		"truncated_second":  valid + "@r2\n" + seq + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := writeTempFile(t, "bad.fq", content)
+			cmd := exec.Command(os.Args[0], "-test.run=^TestLoadFastq_rejectsMalformed$")
+			cmd.Env = append(os.Environ(), "SCRAM_TEST_FASTQ_FILE="+path)
+			output, err := cmd.CombinedOutput()
+			if exitErr, ok := err.(*exec.ExitError); !ok || exitErr.ExitCode() != 1 {
+				t.Fatalf("expected exit status 1, got %v: %s", err, output)
+			}
+			if !strings.Contains(string(output), "Read file format problem") {
+				t.Fatalf("missing format error: %s", output)
+			}
+		})
+	}
+}
 
 func writeTempFile(t *testing.T, name, content string) string {
 	t.Helper()

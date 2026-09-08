@@ -121,6 +121,46 @@ func checkScannerError(scanner *bufio.Scanner, fileName string) {
 	}
 }
 
+// scanFastaRecords joins wrapped sequence lines before visiting each record.
+// The sequence buffer is reused after visit returns.
+func scanFastaRecords(scanner *bufio.Scanner, visit func(string, []byte) error) error {
+	var header string
+	var seq []byte
+	haveHeader := false
+	flush := func() error {
+		if !haveHeader {
+			return nil
+		}
+		if len(seq) == 0 {
+			return fmt.Errorf("missing sequence for header %q", header)
+		}
+		return visit(header, seq)
+	}
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		if line[0] == '>' {
+			if err := flush(); err != nil {
+				return err
+			}
+			header = string(line)
+			seq = seq[:0]
+			haveHeader = true
+		} else {
+			if !haveHeader {
+				return fmt.Errorf("sequence before the first FASTA header")
+			}
+			seq = append(seq, line...)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return flush()
+}
+
 // IndvSeqLoad loads 1 or more small RNA seq. read files.
 // It returns a map with a read sequence as key and a slice of normalized or raw individual read counts as a value,
 // plus the CSV column names for the read files in -f argument order.
@@ -172,7 +212,6 @@ func loadCfaFile(job fileJob, srnaMaps chan fileResult,
 	minLen int, maxLen int, minCount float64, sep string, noNorm bool, wg *sync.WaitGroup) {
 	defer wg.Done()
 	srnaMap := make(map[string]float64)
-	var count float64
 	var totalCount float64
 
 	scanner, closeFile, err := openFastxScanner(job.name)
@@ -181,36 +220,28 @@ func loadCfaFile(job fileJob, srnaMaps chan fileResult,
 		os.Exit(1)
 	}
 	defer closeFile()
-	seqNext := false
-	for scanner.Scan() {
-		fastaLine := scanner.Bytes()
-		switch {
-		case len(fastaLine) > 0 && fastaLine[0] == '>':
-			headerLine := strings.Split(string(fastaLine), sep)
-			if err := checkHeaderError(headerLine, job.name); err != nil {
-				fmt.Println("Read file format problem - header error in " + job.name)
-				errorShutdown()
-			}
-			count, err = strconv.ParseFloat(headerLine[1], 64)
-			if err != nil {
-				fmt.Println("Read file format problem - can't parse read count in header '" +
-					string(fastaLine) + "' in " + job.name)
-				errorShutdown()
-			}
-			seqNext = true
-		case seqNext && len(fastaLine) == 0:
-			fmt.Println("Read file format problem - blank line between header and sequence in " + job.name)
-			errorShutdown()
-		case seqNext:
-			if count >= minCount && len(fastaLine) >= minLen && len(fastaLine) <= maxLen {
-				normalizeSeqInPlace(fastaLine)
-				totalCount += count
-				srnaMap[string(fastaLine)] += count
-			}
-			seqNext = false
+	err = scanFastaRecords(scanner, func(header string, seq []byte) error {
+		headerLine := strings.Split(header, sep)
+		if err := checkHeaderError(headerLine, job.name); err != nil {
+			return err
 		}
+		count, err := strconv.ParseFloat(headerLine[1], 64)
+		if err != nil {
+			return fmt.Errorf("can't parse read count in header %q: %w", header, err)
+		}
+		if count > 0 && len(seq) >= minLen && len(seq) <= maxLen {
+			normalizeSeqInPlace(seq)
+			totalCount += count
+			srnaMap[string(seq)] += count
+		}
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("Read file format problem in %s: %v\n", job.name, err)
+		errorShutdown()
 	}
-	checkScannerError(scanner, job.name)
+	// Apply the threshold to each sequence's combined count, as for FASTA/FASTQ.
+	srnaMap, totalCount = removeReadsBelowMin(minCount, srnaMap, totalCount)
 	if totalCount == 0 {
 		fmt.Println("Warning: no reads in " + job.name + " passed the length/count filters")
 	}
@@ -260,6 +291,7 @@ func loadFastx(job fileJob, firstChar byte, adapter string, srnaMaps chan fileRe
 		// FASTQ: strict 4-line records. Sniffing line types by first character is
 		// unsafe ('+' lines may repeat the header, quality lines may start with '@').
 		lineNo := 0
+		var seq []byte
 		for scanner.Scan() {
 			line := scanner.Bytes()
 			switch lineNo % 4 {
@@ -269,30 +301,38 @@ func loadFastx(job fileJob, firstChar byte, adapter string, srnaMaps chan fileRe
 					errorShutdown()
 				}
 			case 1:
-				addRead(line)
+				// Scanner's buffer may change before the quality line is read.
+				seq = append(seq[:0], line...)
 			case 2:
 				if len(line) == 0 || line[0] != '+' {
 					fmt.Printf("Read file format problem - expected a FASTQ '+' separator at line %d in %s\n", lineNo+1, job.name)
 					errorShutdown()
 				}
+			case 3:
+				if len(line) != len(seq) {
+					fmt.Printf("Read file format problem - FASTQ quality length %d does not match sequence length %d at line %d in %s\n",
+						len(line), len(seq), lineNo+1, job.name)
+					errorShutdown()
+				}
+				addRead(seq)
 			}
 			lineNo++
 		}
+		checkScannerError(scanner, job.name)
+		if lineNo%4 != 0 {
+			fmt.Printf("Read file format problem - incomplete FASTQ record at end of %s after line %d\n", job.name, lineNo)
+			errorShutdown()
+		}
 	} else {
-		// FASTA: a single sequence line following each header line.
-		seqNext := false
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			switch {
-			case len(line) > 0 && line[0] == firstChar:
-				seqNext = true
-			case seqNext:
-				addRead(line)
-				seqNext = false
-			}
+		err := scanFastaRecords(scanner, func(_ string, seq []byte) error {
+			addRead(seq)
+			return nil
+		})
+		if err != nil {
+			fmt.Printf("Read file format problem in %s: %v\n", job.name, err)
+			errorShutdown()
 		}
 	}
-	checkScannerError(scanner, job.name)
 	if untrimmed > 0 {
 		fmt.Println(job.name + " - " + humanize.Comma(untrimmed) +
 			" reads discarded (adapter seed not found)")
@@ -326,12 +366,10 @@ func trimAdapter(adapter string) (bool, []byte) {
 // removeReadsBelowMin removes reads with a count below the stated minimum from the srnaMap
 func removeReadsBelowMin(minCount float64, srnaMap map[string]float64, totalCount float64) (map[string]float64,
 	float64) {
-	if minCount > 1 {
-		for srna, srnaCount := range srnaMap {
-			if srnaCount < minCount {
-				delete(srnaMap, srna)
-				totalCount -= srnaCount
-			}
+	for srna, srnaCount := range srnaMap {
+		if srnaCount < minCount {
+			delete(srnaMap, srna)
+			totalCount -= srnaCount
 		}
 	}
 	return srnaMap, totalCount

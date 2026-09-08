@@ -24,6 +24,18 @@ def test_load_csv_srna_len(scram_csv):
     assert len(scram_csv.df) == 3
 
 
+@pytest.mark.parametrize("header", ["001", "NA", "N/A", "null", "1e3"])
+def test_load_csv_preserves_literal_headers(tmp_path, header):
+    path = tmp_path / "literal_21.csv"
+    path.write_text(
+        "Header,len,sRNA,Position,Strand,Times aligned,rep1\n"
+        f"{header},100,{'A' * 21},1,+,1,10\n"
+    )
+    sc = ScramCSV()
+    sc.load_csv(str(path))
+    assert sc.subset_data(header=header).df["Header"].tolist() == [header]
+
+
 def test_subset_by_header_only(scram_csv):
     # used to raise KeyError dropping the never-created Mean_Count column
     sub = scram_csv.subset_data(header="chr1")

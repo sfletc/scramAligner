@@ -301,7 +301,7 @@ class RefProfiles(object):
         )
 
     def load_single_ref_profiles(
-        self, in_file, header=None, start=None, end=None, padding=0
+        self, in_file, header=None, start=None, end=None, padding=0, allow_empty=False
     ):
         """Loads a scram2 profile file for a single sRNA length
 
@@ -311,11 +311,14 @@ class RefProfiles(object):
             start (int): start position of the range
             end (int): end position of the range
             padding (int): number of base pairs to include on either end of the range
+            allow_empty (bool): accept header-only CSVs when combining read lengths
         """
         subset = start is not None and end is not None
         self.subset = subset
 
-        df = pd.read_csv(in_file)
+        # A converter preserves identifiers such as "001" and "NA" while
+        # retaining normal numeric/missing-value parsing for count columns.
+        df = pd.read_csv(in_file, converters={"Header": str})
         columns = [str(c) for c in df.columns]
         if "Std. Err" in columns:
             raise ValueError(
@@ -329,6 +332,12 @@ class RefProfiles(object):
                 "Header,len,sRNA,Position,Strand,Times aligned,<file columns>"
             )
         replicates = len(columns) - 6
+
+        if df.empty:
+            if allow_empty:
+                self.replicates = replicates
+                return
+            raise ValueError(f"{in_file} contains no alignments")
 
         headers = df.iloc[:, 0].astype(str).str.split().str[0].to_numpy()
         ref_lens = df.iloc[:, 1].to_numpy(dtype=np.int64)
@@ -523,11 +532,11 @@ class DataForPlot(object):
         self.ref_len = profile.ref_len
         self.srna_len = ref_profiles.srna_len
         self.replicates = ref_profiles.replicates
-        # For subset windows, reads overlapping the left edge have negative
-        # relative positions; extra leading rows hold them until coverage has
-        # been smeared, then trim_margin() removes the overhang.
+        # Subsets need room on both sides for reads crossing either edge.
+        # Coverage is calculated over the full read span before clipping back
+        # to the requested window in trim_margin().
         self.margin = self.srna_len - 1 if ref_profiles.subset else 0
-        rows = self.margin + self.ref_len + 1
+        rows = 2 * self.margin + self.ref_len + 1
         self.fwd = np.zeros((rows, self.replicates), dtype=float)
         self.rvs = np.zeros((rows, self.replicates), dtype=float)
         self.x_axis = np.arange(self.ref_len + 1)
@@ -552,11 +561,12 @@ class DataForPlot(object):
                 np.add.at(arr, p, c)
 
     def trim_margin(self):
-        """Removes the left-overhang rows used for reads spanning the left edge of a
+        """Removes the overhang rows used for reads spanning either edge of a
         subset window (a no-op for whole-reference data)."""
         if self.margin:
-            self.fwd = self.fwd[self.margin :]
-            self.rvs = self.rvs[self.margin :]
+            window = slice(self.margin, self.margin + self.ref_len + 1)
+            self.fwd = self.fwd[window]
+            self.rvs = self.rvs[window]
             self.margin = 0
 
     def convert_to_coverage(self, abund=True):
@@ -670,8 +680,11 @@ class DataForPlot(object):
             (np.arange(degree + 1), np.arange(degree)[::-1])
         ).astype(float)  # up then down, centred, length 2*degree+1
         kernel /= kernel.sum()
-        smoothed = np.convolve(data, kernel, mode="same")
-        edge_weight = np.convolve(np.ones_like(data), kernel, mode="same")
+        # NumPy's "same" mode returns the longer operand's length, so crop
+        # the full convolution explicitly when the kernel exceeds the data.
+        window = slice(degree, degree + len(data))
+        smoothed = np.convolve(data, kernel, mode="full")[window]
+        edge_weight = np.convolve(np.ones_like(data), kernel, mode="full")[window]
         return smoothed / edge_weight
 
     def __str__(self):

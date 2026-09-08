@@ -43,7 +43,7 @@ class ScramCSV:
         Args:
             file_path (str): The path to the CSV file to load.
         """
-        self.df = self.pd.read_csv(file_path)
+        self.df = self.pd.read_csv(file_path, converters={"Header": str})
         self.srna_len=int(file_path.split("_")[-1].split(".csv")[0])
 
     def subset_data(
@@ -229,5 +229,4 @@ class ScramCSV:
                 fold_cache[window] = RNA.fold(window)[1]
             energies.append(fold_cache[window])
         self.df["Min_Free_Energy"] = energies
-
 

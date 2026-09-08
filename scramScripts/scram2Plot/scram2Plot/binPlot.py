@@ -187,7 +187,7 @@ def load_ref_profiles(file_prefix, lens):
     for i in lens:
         file_name = "{}_{}.csv".format(file_prefix, i)
         rprofile = RefProfiles()
-        rprofile.load_single_ref_profiles(file_name)
+        rprofile.load_single_ref_profiles(file_name, allow_empty=True)
         rp.append(rprofile)
     return rp
 
@@ -201,12 +201,13 @@ def bin_plot(
     and then generates a bin plot for each
     """
     rps = load_ref_profiles(file_prefix, lens)
-    all_headers = rps[0].single_ref_profiles.keys()
+    # Preserve first-seen order while including references unique to later lengths.
+    all_headers = dict.fromkeys(header for rp in rps for header in rp.single_ref_profiles)
     headers = [i for i in all_headers if i.startswith(header_prefix)]
     if not headers:
         raise ValueError(
             f"No reference headers starting with '{header_prefix}' found in "
-            f"{file_prefix}_{lens[0]}.csv"
+            f"{file_prefix} at lengths {lens}"
         )
     for header in headers:
         srps = [

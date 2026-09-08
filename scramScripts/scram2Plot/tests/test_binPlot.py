@@ -1,7 +1,36 @@
 import numpy as np
+import pytest
+
+import scram2Plot.binPlot as bp
 
 from scram2Plot.binPlot import calculate_means_and_ses, create_dataframe, get_bin_data
 from scram2Plot.profilePlot import SingleAlignment, SingleRefProfile
+
+
+@pytest.mark.parametrize("first_empty", [False, True])
+def test_bin_plot_includes_headers_from_later_lengths(tmp_path, monkeypatch, first_empty):
+    header = "Header,len,sRNA,Position,Strand,Times aligned,rep1\n"
+    first_rows = "" if first_empty else f"chr1,100,{'A' * 21},1,+,1,10\n"
+    (tmp_path / "align_21.csv").write_text(header + first_rows)
+    (tmp_path / "align_22.csv").write_text(
+        header + f"chr2,100,{'A' * 22},1,+,1,20\n" + f"chr1,100,{'C' * 22},2,-,1,30\n"
+    )
+    plotted = {}
+
+    def capture(profiles, bin_size, ref_header, *args):
+        plotted[ref_header] = [profile.srna_len for profile in profiles]
+
+    monkeypatch.setattr(bp, "plot_bin_plot", capture)
+    bp.bin_plot(str(tmp_path / "align"), [21, 22], "chr", 50)
+    assert plotted == {"chr1": [22] if first_empty else [21, 22], "chr2": [22]}
+
+
+def test_bin_plot_no_matching_headers_reports_error(tmp_path):
+    header = "Header,len,sRNA,Position,Strand,Times aligned,rep1\n"
+    for length in [21, 22]:
+        (tmp_path / f"align_{length}.csv").write_text(header)
+    with pytest.raises(ValueError, match="No reference headers"):
+        bp.bin_plot(str(tmp_path / "align"), [21, 22], "chr", 50)
 
 
 def make_profile(alignments, ref_len, replicates):
